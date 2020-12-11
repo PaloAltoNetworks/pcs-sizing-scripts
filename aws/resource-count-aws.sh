@@ -32,7 +32,6 @@ rds_instance_count=0
 natgw_count=0
 redshift_count=0
 elb_count=0
-elbv2_count=0
 
 ##########################################################################################
 ## Iterate through each region and type.
@@ -88,16 +87,6 @@ done
 echo "Total count of ELBs across all regions: ${elb_count}"
 echo
 
-echo "Application ELBs"
-for i in "${aws_regions[@]}"
-do
-   count=$(aws elbv2 describe-load-balancers --region="${i}" --output json | jq '.[] | length')
-   echo "Region = ${i} Application ELBs = ${count}"
-   elbv2_count=$((elbv2_count + count))
-done
-echo "Total count of Application ELBs across all regions: ${elbv2_count}"
-echo
-
 ##########################################################################################
 ## Output totals.
 ##########################################################################################
@@ -109,7 +98,6 @@ echo "Total count of RDS Instances across all regions: ${rds_instance_count}"
 echo "Total count of NAT Gateways across all regions: ${natgw_count}"
 echo "Total count of RedShift Clusters across all regions: ${redshift_count}"
 echo "Total count of ELBs across all regions: ${elb_count}"
-echo "Total count of Application ELBs across all regions: ${elbv2_count}"
 echo
-echo "Total billable resources: $((ec2_instance_count + rds_instance_count + natgw_count + redshift_count + elb_count + elbv2_count))"
+echo "Total billable resources: $((ec2_instance_count + rds_instance_count + natgw_count + redshift_count + elb_count))"
 echo "###################################################################################"
