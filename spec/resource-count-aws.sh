@@ -1,3 +1,5 @@
+# To use this test, call: shellspec spec/resource-count-aws.sh
+
 Describe 'resource-count-aws'
 
   ########################################################################################
