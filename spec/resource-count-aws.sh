@@ -253,6 +253,7 @@ EOJ
     The output should include "Count"
     The variable TOTAL_ACCOUNTS should eq 1
     The variable WORKLOAD_COUNT_GLOBAL should eq 20
+    The variable WORKLOAD_COUNT_GLOBAL_WITH_IAM_MODULE should eq 25
   End
 
   It 'counts organization member account resources'
@@ -266,6 +267,7 @@ EOJ
     The output should include "Count"
     The variable TOTAL_ACCOUNTS should eq 4
     The variable WORKLOAD_COUNT_GLOBAL should eq 80
+    The variable WORKLOAD_COUNT_GLOBAL_WITH_IAM_MODULE should eq 100
   End
 
 End

@@ -239,6 +239,7 @@ reset_global_counters() {
   NATGW_COUNT_GLOBAL=0
   ELB_COUNT_GLOBAL=0
   WORKLOAD_COUNT_GLOBAL=0
+  WORKLOAD_COUNT_GLOBAL_WITH_IAM_MODULE=0
 }
 
 ##########################################################################################
@@ -319,9 +320,9 @@ count_account_resources() {
     echo ""
 
     if [ "${USE_AWS_ORG}" = "true" ]; then
+      WORKLOAD_COUNT=$((EC2_INSTANCE_COUNT + RDS_INSTANCE_COUNT + REDSHIFT_COUNT + NATGW_COUNT + ELB_COUNT))
       echo "###################################################################################"
       echo "Member Account Totals"
-      WORKLOAD_COUNT=$((EC2_INSTANCE_COUNT + RDS_INSTANCE_COUNT + REDSHIFT_COUNT + NATGW_COUNT + ELB_COUNT))
       echo "Total billable resources for Member Account ${ACCOUNT_NAME} ($ACCOUNT_ID): ${WORKLOAD_COUNT}"
       echo "###################################################################################"
       echo ""
@@ -340,6 +341,9 @@ count_account_resources() {
     fi
   done
 
+  WORKLOAD_COUNT_GLOBAL=$((EC2_INSTANCE_COUNT_GLOBAL + RDS_INSTANCE_COUNT_GLOBAL + NATGW_COUNT_GLOBAL + REDSHIFT_COUNT_GLOBAL + ELB_COUNT_GLOBAL))
+  WORKLOAD_COUNT_GLOBAL_WITH_IAM_MODULE=$((WORKLOAD_COUNT_GLOBAL*125/100))
+
   echo "###################################################################################"
   echo "Totals"
   echo "  Count of EC2 Instances across all regions: ${EC2_INSTANCE_COUNT_GLOBAL}"
@@ -347,8 +351,8 @@ count_account_resources() {
   echo "  Count of NAT Gateways across all regions: ${NATGW_COUNT_GLOBAL}"
   echo "  Count of RedShift Clusters across all regions: ${REDSHIFT_COUNT_GLOBAL}"
   echo "  Count of ELBs across all regions: ${ELB_COUNT_GLOBAL}"
-  WORKLOAD_COUNT_GLOBAL=$((EC2_INSTANCE_COUNT_GLOBAL + RDS_INSTANCE_COUNT_GLOBAL + NATGW_COUNT_GLOBAL + REDSHIFT_COUNT_GLOBAL + ELB_COUNT_GLOBAL))
   echo "Total billable resources: ${WORKLOAD_COUNT_GLOBAL}"
+  echo "(If you will be using the IAM Security Module, total billable resources will be: ${WORKLOAD_COUNT_GLOBAL_WITH_IAM_MODULE})"
   echo "###################################################################################"
 }
 
