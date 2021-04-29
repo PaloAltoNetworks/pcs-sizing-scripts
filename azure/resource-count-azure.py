@@ -1,91 +1,95 @@
 ##########################################
-# Azure Subscription Resource Census
+# Azure Subscription Resource Count
 #
 # Prerequisites: None
 #
-# API used:
+# Azure APIs Used:
+#
 # - az account list
 # - az resource list
+# - az vm list
 #
-# Instruction:
+# Instructions:
+#
 # - Go to Azure Portal
-# - Turn on Cloud SHell (Bash)
+# - Use Cloud Shell (Bash)
 # - Upload the script
-# - run the script:
-#       python3 <script_name.py>
-#
-
+# - Run the script:
+#       python3 resource-count-azure.py
+##########################################
 
 import subprocess
 import json
 
+# (This script queries for running VMs separately.)
 
-mapping = {
-    "Microsoft.Network/loadBalancers" : "Load Balancers",
-    "Microsoft.Sql/servers/databases" : "SQL Server and databases",
-    "Microsoft.Sql/servers": "SQL Server and databases",
-    "Microsoft.Sql/managedInstances:": "SQL Managed Instances",
-    "Microsoft.DBforPostgreSQL/servers": "PostgreSQL Servers"
+resource_mapping = {
+    'Microsoft.DBforPostgreSQL/servers': 'PostgreSQL Servers',
+    'Microsoft.Network/loadBalancers'  : 'Network Load Balancers',
+    'Microsoft.Sql/managedInstances:'  : 'SQL Managed Instances',
+    'Microsoft.Sql/servers'            : 'SQL Server and Databases',
+    'Microsoft.Sql/servers/databases'  : 'SQL Server and Databases'
 }
 
-errors = []
+global_az_resource_count = 0
+error_list = []
 
-accounts = json.loads(subprocess.getoutput("az account list --all --output json 2>&1"))
+az_account_list = json.loads(subprocess.getoutput('az account list --all --output json 2>&1'))
 
-global_count = 0
-for account in accounts:
-    if account['state'] != 'Enabled':
+for az_account in az_account_list:
+    if az_account['state'] != 'Enabled':
         continue
+    print('###################################################################################')
+    print("Processing Account: {} ({})".format(az_account['name'], az_account['id']))
 
-    print("Processing account {} ({})".format(account['name'], account['id']))
-
-    total_count = 0
-    census = {}
+    az_account_resource_count = 0
+    az_account_census = {}
 
     try:
-        # Get running VM separately
-        running_vms = json.loads(subprocess.getoutput("az vm list -d --query \"[?powerState=='VM running']\" --subscription {} --output json 2>&1 | jq '.[].id' | wc -l".format(account['id'])))
-        if running_vms > 0:
-            census["(running) Virtual Machines"] = running_vms
-            total_count += running_vms
+        # Query for running VMs separately.
+        az_vm_list_count = subprocess.getoutput("az vm list -d --query \"[?powerState=='VM running']\" --subscription {} --output json 2>&1 | jq '.[].id' | wc -l".format(az_account['id']))
+        az_vm_list_count = json.loads(az_vm_list_count)
+        if az_vm_list_count > 0:
+            az_account_census['(running) Virtual Machines'] = az_vm_list_count
+            az_account_resource_count += az_vm_list_count
     except Exception as e:
-        error = '{} ({}) - Error encountered when trying to run az vm list. Continuing...'.format(account['name'], account['id'])
-        errors.append(error)
-        print(error)
+        this_error = "{} ({}) - Error executing 'az vm list'.".format(az_account['name'], az_account['id'])
+        error_list.append(this_error)
+        print(this_error)
 
     try:
-        resources = json.loads(subprocess.getoutput("az resource list --subscription {} --output json 2>&1".format(account['id'])))
-
-        for resource in resources:
-            resource_type = resource['type']
-
-            if resource_type in mapping:
-                total_count += 1
-                if mapping[resource_type] in census:
-                    census[mapping[resource_type]] += 1
+        az_resource_list = subprocess.getoutput("az resource list --subscription {} --output json 2>&1".format(az_account['id']))
+        az_resources = json.loads(az_resource_list)
+        for az_resource in az_resources:
+            resource_type = az_resource['type']
+            if resource_type in resource_mapping:
+                az_account_resource_count += 1
+                if resource_mapping[resource_type] in az_account_census:
+                    az_account_census[resource_mapping[resource_type]] += 1
                 else:
-                    census[mapping[resource_type]] = 1
-
-
-
-        for resource_type, count in sorted(census.items()):
-            print("{} : {}".format(resource_type, count))
+                    az_account_census[resource_mapping[resource_type]] = 1
+        for resource_type, resource_count in sorted(az_account_census.items()):
+            print("{} : {}".format(resource_type, resource_count))
     except Exception as e:
-        error = '{} ({}) - Error encountered when executing az resource list. Received unexpected response from Azure API'.format(account['name'], account['id'])
-        errors.append(error)
-        print(error)
+        this_error = "{} ({}) - Error executing 'az resource list'.".format(az_account['name'], az_account['id'])
+        error_list.append(this_error)
+        print(this_error)
 
+    print("Total Billable Resources: {}".format(az_account_resource_count))
+    print('###################################################################################')
+    global_az_resource_count += az_account_resource_count
 
+print()
+print('###################################################################################')
+print("Grand Total Billable Resources: {}".format(global_az_resource_count))
+print('###################################################################################')
+print()
 
-
-
-    print("TOTAL BILLABLE RESOURCE: {} \n\n\n".format(total_count))
-    global_count += total_count
-
-
-print("###########################\nGrant total billable resource count: {}\n###########################".format(global_count))
-
-print("\n\nList of errors encountered:")
-for error in errors:
-    print(error)
+if error_list:
+    print('###################################################################################')
+    print('Errors:')
+    for this_error in error_list:
+        print(this_error)
+    print('###################################################################################')
+    print()
 
