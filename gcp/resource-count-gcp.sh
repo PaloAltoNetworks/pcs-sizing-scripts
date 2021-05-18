@@ -28,7 +28,6 @@
 #
 # - gcloud projects list
 # - gcloud compute instances list
-# - gcloud compute forwarding-rules list
 # - gcloud compute routers list
 # - gcloud compute routers nats list
 # - gcloud sql instances list
@@ -72,14 +71,6 @@ gcloud_projects_list() {
 gcloud_compute_instances_list() {
   # shellcheck disable=SC2086
   RESULT=$(gcloud compute instances list --filter="status:(RUNNING)" --project "${1}" --format json $VERBOSITY_ARGS 2>/dev/null)
-  if [ $? -eq 0 ]; then
-    echo "${RESULT}"
-  fi
-}
-
-gcloud_compute_forwarding_rules_list() {
-  # shellcheck disable=SC2086
-  RESULT=$(gcloud compute forwarding-rules list --project "${1}" --format json $VERBOSITY_ARGS 2>/dev/null)
   if [ $? -eq 0 ]; then
     echo "${RESULT}"
   fi
@@ -130,7 +121,6 @@ get_project_list() {
 
 reset_project_counters() {
   COMPUTE_INSTANCES_COUNT=0
-  COMPUTE_FORWARDING_RULES_COUNT=0
   COMPUTE_NAT_COUNT=0
   COMPUTE_BACKEND_SERVICES_COUNT=0
   SQL_INSTANCES_COUNT=0
@@ -139,7 +129,6 @@ reset_project_counters() {
 
 reset_global_counters() {
   COMPUTE_INSTANCES_COUNT_GLOBAL=0
-  COMPUTE_FORWARDING_RULES_COUNT_GLOBAL=0
   COMPUTE_NAT_COUNT_GLOBAL=0
   COMPUTE_BACKEND_SERVICES_COUNT_GLOBAL=0
   SQL_INSTANCES_COUNT_GLOBAL=0
@@ -162,10 +151,6 @@ count_project_resources() {
     COMPUTE_INSTANCES_COUNT=$((COMPUTE_INSTANCES_COUNT + RESOURCE_COUNT))
     echo "  Count of Running Compute Instances: ${COMPUTE_INSTANCES_COUNT}"
 
-    RESOURCE_COUNT=$(gcloud_compute_forwarding_rules_list "${PROJECT}" | jq '.[].id' | wc -l)
-    COMPUTE_FORWARDING_RULES_COUNT=$((COMPUTE_FORWARDING_RULES_COUNT + RESOURCE_COUNT))
-    echo "  Count of Compute Load Balancer Forwarding Rules: ${COMPUTE_FORWARDING_RULES_COUNT}"
-
     ROUTERS=($(gcloud_compute_routers_list "${PROJECT}" | jq  -r '.[] | "\(.name);\(.region)"'))
     for ROUTER in "${ROUTERS[@]}"
     do
@@ -184,13 +169,12 @@ count_project_resources() {
     SQL_INSTANCES_COUNT=$((SQL_INSTANCES_COUNT + RESOURCE_COUNT))
     echo "  Count of SQL Instances: ${SQL_INSTANCES_COUNT}"
 
-    WORKLOAD_COUNT=$((COMPUTE_INSTANCES_COUNT + COMPUTE_FORWARDING_RULES_COUNT + COMPUTE_NAT_COUNT + COMPUTE_BACKEND_SERVICES_COUNT + SQL_INSTANCES_COUNT))
+    WORKLOAD_COUNT=$((COMPUTE_INSTANCES_COUNT + COMPUTE_NAT_COUNT + COMPUTE_BACKEND_SERVICES_COUNT + SQL_INSTANCES_COUNT))
     echo "Total billable resources for Project ${PROJECTS[$PROJECT_INDEX]}: ${WORKLOAD_COUNT}"
     echo "###################################################################################"
     echo ""
 
     COMPUTE_INSTANCES_COUNT_GLOBAL=$((COMPUTE_INSTANCES_COUNT_GLOBAL + COMPUTE_INSTANCES_COUNT))
-    COMPUTE_FORWARDING_RULES_COUNT_GLOBAL=$((COMPUTE_FORWARDING_RULES_COUNT_GLOBAL + COMPUTE_FORWARDING_RULES_COUNT))
     COMPUTE_NAT_COUNT_GLOBAL=$((COMPUTE_NAT_COUNT_GLOBAL + COMPUTE_NAT_COUNT))
     COMPUTE_BACKEND_SERVICES_COUNT_GLOBAL=$((COMPUTE_BACKEND_SERVICES_COUNT_GLOBAL + COMPUTE_BACKEND_SERVICES_COUNT))
     SQL_INSTANCES_COUNT_GLOBAL=$((SQL_INSTANCES_COUNT_GLOBAL + SQL_INSTANCES_COUNT))
@@ -201,11 +185,10 @@ count_project_resources() {
   echo "###################################################################################"
   echo "Totals for all projects"
   echo "  Count of Running Compute Instances: ${COMPUTE_INSTANCES_COUNT_GLOBAL}"
-  echo "  Count of Compute Load Balancer Forwarding Rules: ${COMPUTE_FORWARDING_RULES_COUNT_GLOBAL}"
   echo "  Count of NAT: ${COMPUTE_NAT_COUNT_GLOBAL}"
   echo "  Count of Compute Load Balancing Services: ${COMPUTE_BACKEND_SERVICES_COUNT_GLOBAL}"
   echo "  Count of SQL Instances: ${SQL_INSTANCES_COUNT_GLOBAL}"
-  WORKLOAD_COUNT_GLOBAL=$((COMPUTE_INSTANCES_COUNT_GLOBAL + COMPUTE_FORWARDING_RULES_COUNT_GLOBAL + COMPUTE_NAT_COUNT_GLOBAL + COMPUTE_BACKEND_SERVICES_COUNT_GLOBAL + SQL_INSTANCES_COUNT_GLOBAL))
+  WORKLOAD_COUNT_GLOBAL=$((COMPUTE_INSTANCES_COUNT_GLOBAL + COMPUTE_NAT_COUNT_GLOBAL + COMPUTE_BACKEND_SERVICES_COUNT_GLOBAL + SQL_INSTANCES_COUNT_GLOBAL))
   echo "Total billable resources for all projects: ${WORKLOAD_COUNT_GLOBAL}"
   echo "###################################################################################"
 }
