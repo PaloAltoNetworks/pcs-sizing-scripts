@@ -1,0 +1,20 @@
+name: shellspec
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  # Allow this workflow to be executed manually from the Actions tab:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      # Checkout the repository under $GITHUB_WORKSPACE so this job can access it:
+      - uses: actions/checkout@v2
+      - name: install shellspec
+        run: curl -fsSL https://git.io/shellspec | sh -s -- --yes
+      - name: run shellspec using bash
+        run: bash shellspec spec/*_spec.sh
