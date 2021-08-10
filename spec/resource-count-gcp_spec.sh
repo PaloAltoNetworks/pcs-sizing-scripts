@@ -1,4 +1,4 @@
-# To use this test, call: shellspec spec/resource-count-gcp.sh
+# To use this test, call: shellspec spec/resource-count-gcp_spec.sh
 
 Describe 'resource-count-gcp'
 
