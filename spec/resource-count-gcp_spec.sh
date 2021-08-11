@@ -56,23 +56,6 @@ EOJ
 EOJ
   }
 
-  gcloud_compute_forwarding_rules_list() {
-    cat << EOJ
-[
-  {
-    "id": "123456789012",
-    "name": "rule1",
-    "region": "us-central1"
-  },
-  {
-    "id": "234567891234",
-    "name": "rule2",
-    "region": "us-central1"
-  }
-]
-EOJ
-  }
-
   gcloud_compute_routers_list() {
     cat << EOJ
 [
@@ -178,7 +161,7 @@ EOJ
     When call count_project_resources
     The output should include "Count"
     The variable TOTAL_PROJECTS should eq 2
-    The variable WORKLOAD_COUNT_GLOBAL should eq 24
+    The variable WORKLOAD_COUNT_GLOBAL should eq 20
   End
 
 End
