@@ -52,7 +52,7 @@ oci_compartments_list() {
 
 oci_compute_instances_list() {
   # shellcheck disable=SC2086
-  RESULT=$(oci compute instance list --all --compartment-id "${1}" 2>/dev/null)
+  RESULT=$(oci compute instance list --all --compartment-id "${1}" --lifecycle-state "RUNNING" 2>/dev/null)
   if [ $? -eq 0 ]; then
     echo "${RESULT}"
   fi
