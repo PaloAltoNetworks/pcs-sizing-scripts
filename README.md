@@ -6,7 +6,7 @@ Prisma Cloud Sizing Scripts
 
 ## Cloud Providers:
 
-* [AWS](https://github.com/PaloAltoNetworks/pcs-sizing-scripts/tree/main/aws) 
+* [AWS](/aws) 
 * [Azure](/azure)
 * [GCP](/gcp)
 * [OCI](/oci)
