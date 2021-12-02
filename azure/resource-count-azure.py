@@ -82,6 +82,8 @@ for az_account in az_account_list:
 print()
 print('###################################################################################')
 print("Grand Total Billable Resources: {}".format(global_az_resource_count))
+print()
+print("If you will be using the IAM Security Module, total billable resources will be: {}".format(round(global_az_resource_count * 1.25)))
 print('###################################################################################')
 print()
 
