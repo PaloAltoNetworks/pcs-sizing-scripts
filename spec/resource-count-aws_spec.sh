@@ -45,12 +45,12 @@ EOJ
     cat << EOJ
 {
 	"Organization": {
-		"MasterAccountArn": "arn:aws:organizations::111111111111:account/o-exampleorgid/111111111111",
+		"MasterAccountArn": "arn:aws:organizations::011111111111:account/o-exampleorgid/011111111111",
 		"MasterAccountEmail": "bill@example.com",
-		"MasterAccountId": "111111111111",
+		"MasterAccountId": "011111111111",
 		"Id": "o-exampleorgid",
 		"FeatureSet": "ALL",
-		"Arn": "arn:aws:organizations::111111111111:organization/o-exampleorgid",
+		"Arn": "arn:aws:organizations::011111111111:organization/o-exampleorgid",
 		"AvailablePolicyTypes": [{
 			"Status": "ENABLED",
 			"Type": "SERVICE_CONTROL_POLICY"
@@ -64,16 +64,16 @@ EOJ
     cat << EOJ
 {
 	"Accounts": [{
-			"Arn": "arn:aws:organizations::111111111111:account/o-exampleorgid/111111111111",
+			"Arn": "arn:aws:organizations::011111111111:account/o-exampleorgid/011111111111",
 			"JoinedMethod": "INVITED",
 			"JoinedTimestamp": 1481830215.45,
-			"Id": "111111111111",
+			"Id": "011111111111",
 			"Name": "MasterAccount",
 			"Email": "bill@example.com",
 			"Status": "ACTIVE"
 		},
 		{
-			"Arn": "arn:aws:organizations::111111111111:account/o-exampleorgid/222222222222",
+			"Arn": "arn:aws:organizations::011111111111:account/o-exampleorgid/222222222222",
 			"JoinedMethod": "INVITED",
 			"JoinedTimestamp": 1481835741.044,
 			"Id": "222222222222",
@@ -82,7 +82,7 @@ EOJ
 			"Status": "ACTIVE"
 		},
 		{
-			"Arn": "arn:aws:organizations::111111111111:account/o-exampleorgid/333333333333",
+			"Arn": "arn:aws:organizations::011111111111:account/o-exampleorgid/333333333333",
 			"JoinedMethod": "INVITED",
 			"JoinedTimestamp": 1481835795.536,
 			"Id": "333333333333",
@@ -91,7 +91,7 @@ EOJ
 			"Status": "ACTIVE"
 		},
 		{
-			"Arn": "arn:aws:organizations::111111111111:account/o-exampleorgid/444444444444",
+			"Arn": "arn:aws:organizations::011111111111:account/o-exampleorgid/444444444444",
 			"JoinedMethod": "INVITED",
 			"JoinedTimestamp": 1481835812.143,
 			"Id": "444444444444",
@@ -109,7 +109,7 @@ EOJ
 {
     "AssumedRoleUser": {
         "AssumedRoleId": "AROA3XFRBF535PLBIFPI4:s3-access-example",
-        "Arn": "arn:aws:organizations::111111111111:account/o-exampleorgid/222222222222"
+        "Arn": "arn:aws:organizations::011111111111:account/o-exampleorgid/222222222222"
     },
     "Credentials": {
         "SecretAccessKey": "9drTJvcXLB89EXAMPLELB8923FB892xMFI",
@@ -201,7 +201,7 @@ EOJ
   End
 
   It 'assumes a role'
-    MASTER_ACCOUNT_ID=111111111111
+    MASTER_ACCOUNT_ID=011111111111
     #
     When call assume_role "ProductionAccount" 222222222222
     The output should not include "skipping"
