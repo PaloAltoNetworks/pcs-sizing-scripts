@@ -187,7 +187,7 @@ assume_role() {
   ACCOUNT_ID="${2}"
   echo "###################################################################################"
   echo "Processing Account: ${ACCOUNT_NAME} (${ACCOUNT_ID})"
-  if [[ $ACCOUNT_ID -eq $MASTER_ACCOUNT_ID ]]; then 
+  if [ "${ACCOUNT_ID}" = "${MASTER_ACCOUNT_ID}" ]; then 
     echo "  Account is the master account, skipping assume role ..."
   else
     ACCOUNT_ASSUME_ROLE_ARN="arn:aws:iam::${ACCOUNT_ID}:role/OrganizationAccountAccessRole"
