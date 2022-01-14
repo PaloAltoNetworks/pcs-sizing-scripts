@@ -23,6 +23,7 @@
 # - aws ec2 describe-nat-gateways
 # - aws redshift describe-clusters
 # - aws elb describe-load-balancer
+# - aws lambda get-account-settings
 ##########################################################################################
 
 ##########################################################################################
@@ -136,6 +137,15 @@ aws_elb_describe_load_balancers() {
   fi
 }
 
+aws_lambda_get_account_settings() {
+  RESULT=$(aws lambda get-account-settings --region="${1}" --output json 2>/dev/null)
+  if [ $? -eq 0 ]; then
+    echo "${RESULT}"
+  else
+    echo '{"Error": [] }'
+  fi
+}
+
 ####
 
 get_region_list() {
@@ -229,6 +239,7 @@ reset_account_counters() {
   NATGW_COUNT=0
   REDSHIFT_COUNT=0
   ELB_COUNT=0
+  LAMBDA_COUNT=0
   WORKLOAD_COUNT=0
 }
 
@@ -238,7 +249,9 @@ reset_global_counters() {
   REDSHIFT_COUNT_GLOBAL=0
   NATGW_COUNT_GLOBAL=0
   ELB_COUNT_GLOBAL=0
+  LAMBDA_COUNT_GLOBAL=0
   WORKLOAD_COUNT_GLOBAL=0
+  WORKLOAD_COUNT_COMPUTE_GLOBAL=0
   WORKLOAD_COUNT_GLOBAL_WITH_IAM_MODULE=0
 }
 
@@ -319,8 +332,20 @@ count_account_resources() {
     echo "###################################################################################"
     echo ""
 
+    echo "###################################################################################"
+    echo "Lambda Functions"
+    for i in "${REGION_LIST[@]}"
+    do
+      RESOURCE_COUNT=$(aws_lambda_get_account_settings "${i}" | jq '.AccountUsage.FunctionCount | length' 2>/dev/null)
+      echo " Count of Lambda Functions in Region ${i}: ${RESOURCE_COUNT}"
+      LAMBDA_COUNT=$((LAMBDA_COUNT + RESOURCE_COUNT))
+    done
+    echo "Total Lambda Functions across all regions: ${LAMBDA_COUNT}"
+    echo "###################################################################################"
+    echo ""
+
     if [ "${USE_AWS_ORG}" = "true" ]; then
-      WORKLOAD_COUNT=$((EC2_INSTANCE_COUNT + RDS_INSTANCE_COUNT + REDSHIFT_COUNT + NATGW_COUNT + ELB_COUNT))
+      WORKLOAD_COUNT=$((EC2_INSTANCE_COUNT + RDS_INSTANCE_COUNT + REDSHIFT_COUNT + NATGW_COUNT + ELB_COUNT + LAMBDA_COUNT))
       echo "###################################################################################"
       echo "Member Account Totals"
       echo "Total billable resources for Member Account ${ACCOUNT_NAME} ($ACCOUNT_ID): ${WORKLOAD_COUNT}"
@@ -333,6 +358,7 @@ count_account_resources() {
     NATGW_COUNT_GLOBAL=$((NATGW_COUNT_GLOBAL + NATGW_COUNT))
     REDSHIFT_COUNT_GLOBAL=$((REDSHIFT_COUNT_GLOBAL + REDSHIFT_COUNT))
     ELB_COUNT_GLOBAL=$((ELB_COUNT_GLOBAL + ELB_COUNT))
+    LAMBDA_COUNT_GLOBAL=$((LAMBDA_COUNT_GLOBAL + LAMBDA_COUNT))
 
     reset_account_counters
 
@@ -342,18 +368,34 @@ count_account_resources() {
   done
 
   WORKLOAD_COUNT_GLOBAL=$((EC2_INSTANCE_COUNT_GLOBAL + RDS_INSTANCE_COUNT_GLOBAL + NATGW_COUNT_GLOBAL + REDSHIFT_COUNT_GLOBAL + ELB_COUNT_GLOBAL))
+  WORKLOAD_COUNT_COMPUTE_GLOBAL=$((LAMBDA_COUNT_GLOBAL))
   WORKLOAD_COUNT_GLOBAL_WITH_IAM_MODULE=$((WORKLOAD_COUNT_GLOBAL*125/100))
+  WORKLOAD_COUNT_IAM_MODULE=$((WORKLOAD_COUNT_GLOBAL_WITH_IAM_MODULE - WORKLOAD_COUNT_GLOBAL))
+  TOTAL_BILLABLE=$((${WORKLOAD_COUNT_GLOBAL} + ${WORKLOAD_COUNT_COMPUTE_GLOBAL}))
+  TOTAL_BILLABLE_WITH_IAM_MODULE=$((${WORKLOAD_COUNT_GLOBAL_WITH_IAM_MODULE} + ${WORKLOAD_COUNT_COMPUTE_GLOBAL}))
 
   echo "###################################################################################"
-  echo "Totals"
+  echo ""
+  echo "Resource counts:"
   echo "  Count of EC2 Instances across all regions: ${EC2_INSTANCE_COUNT_GLOBAL}"
   echo "  Count of RDS Instances across all regions: ${RDS_INSTANCE_COUNT_GLOBAL}"
   echo "  Count of NAT Gateways across all regions: ${NATGW_COUNT_GLOBAL}"
   echo "  Count of RedShift Clusters across all regions: ${REDSHIFT_COUNT_GLOBAL}"
   echo "  Count of ELBs across all regions: ${ELB_COUNT_GLOBAL}"
-  echo "Total billable resources: ${WORKLOAD_COUNT_GLOBAL}"
-  echo "(If you will be using the IAM Security Module, total billable resources will be: ${WORKLOAD_COUNT_GLOBAL_WITH_IAM_MODULE})"
+  echo "  Count of Lambda Functions across all regions: ${LAMBDA_COUNT_GLOBAL}"
+  echo ""
   echo "###################################################################################"
+  echo ""
+  echo "Totals below are probable consumption based on time of script run:"
+  echo "  Total billable CSPM resources: ${WORKLOAD_COUNT_GLOBAL}"
+  echo "  Total billable IAM resources: ${WORKLOAD_COUNT_IAM_MODULE}"
+  echo "  Total billable Compute resources: ${WORKLOAD_COUNT_COMPUTE_GLOBAL}"
+  echo "    ^ This is assuming all Lambda Functions will be scanned by Compute"
+  echo ""
+  echo "###################################################################################"
+  echo "Grand Total billable resources: ${TOTAL_BILLABLE_WITH_IAM_MODULE}"
+  echo "###################################################################################"
+  echo ""
 }
 
 ##########################################################################################
