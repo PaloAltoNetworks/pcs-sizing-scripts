@@ -22,6 +22,7 @@ The below AWS APIs need to be enabled in order to gather information from AWS.
 * aws ec2 describe-nat-gateways
 * aws redshift describe-clusters
 * aws elb describe-load-balancer
+* aws lambda get-account-settings
 
 ## Running the Script on Windows
 
