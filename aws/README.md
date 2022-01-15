@@ -3,6 +3,9 @@
 ## Overview
 
 This document describes how to prepare for, and how to run the Prisma Cloud AWS License Sizing Script.
+* There are 2 different versions of the script, one with Compute and one without. Consult the Prisma Cloud team on which version to run.
+    * `resource-count-aws.sh`
+    * `resource-count-aws-with-compute.sh`
 
 ## Prerequisites
 
@@ -22,6 +25,7 @@ The below AWS APIs need to be enabled in order to gather information from AWS.
 * aws ec2 describe-nat-gateways
 * aws redshift describe-clusters
 * aws elb describe-load-balancer
+* aws lambda get-account-settings
 
 ## Running the Script on Windows
 
