@@ -173,6 +173,17 @@ EOJ
 EOJ
   }
 
+  aws_lambda_get_account_settings() {
+    cat << EOJ
+{
+    "AccountLimit": {},
+    "AccountUsage": {
+       "FunctionCount": 3
+    }
+}
+EOJ
+  }
+
   ########################################################################################
   # https://github.com/shellspec/shellspec#it-specify-example---example-block
   ########################################################################################
@@ -240,7 +251,15 @@ EOJ
     The output should not include "Error"
   End
 
-  ####
+  It 'returns lambda function statistics'
+    When call aws_lambda_get_account_settings
+    The output should not include "Error"
+  End
+
+  ########################################################################################
+  # Note that resource totals are the result of the other mock api calls being called four times,
+  # as a result of the mock api region call returning four regions. 
+  ########################################################################################
 
   It 'counts account resources'
     USE_AWS_ORG="false"
@@ -268,6 +287,20 @@ EOJ
     The variable TOTAL_ACCOUNTS should eq 4
     The variable WORKLOAD_COUNT_GLOBAL should eq 80
     The variable WORKLOAD_COUNT_GLOBAL_WITH_IAM_MODULE should eq 100
+  End
+
+  It 'counts compute resources'
+    USE_AWS_ORG="false"
+    WITH_CWP="true"
+    get_account_list > /dev/null 2>&1
+    get_region_list  > /dev/null 2>&1
+    reset_account_counters
+    reset_global_counters
+    #
+    When call count_account_resources
+    The output should include "Count"
+    The variable LAMBDA_COUNT_GLOBAL should eq 12
+    The variable LAMBDA_CREDIT_USAGE_GLOBAL should eq 2
   End
 
 End
