@@ -23,6 +23,7 @@
 # - aws ec2 describe-nat-gateways
 # - aws redshift describe-clusters
 # - aws elb describe-load-balancer
+# - aws lambda get-account-settings (optional)
 ##########################################################################################
 
 ##########################################################################################
@@ -43,6 +44,17 @@ if [ "${1}X" == "orgX" ]; then
 else
    USE_AWS_ORG="false"
 fi
+
+##########################################################################################
+## Optionally report on Compute by passing "cwp" as an argument.
+##########################################################################################
+
+if [ "${1}X" == "cwpX" ]; then
+   WITH_CWP="true"
+else
+   WITH_CWP="false"
+fi
+
 
 ##########################################################################################
 ## Utility functions.
@@ -129,6 +141,15 @@ aws_redshift_describe_clusters() {
 
 aws_elb_describe_load_balancers() {
   RESULT=$(aws elb describe-load-balancers --max-items 99999 --region="${1}" --output json 2>/dev/null)
+  if [ $? -eq 0 ]; then
+    echo "${RESULT}"
+  else
+    echo '{"Error": [] }'
+  fi
+}
+
+aws_lambda_get_account_settings() {
+  RESULT=$(aws lambda get-account-settings --region="${1}" --output json 2>/dev/null)
   if [ $? -eq 0 ]; then
     echo "${RESULT}"
   else
@@ -229,6 +250,7 @@ reset_account_counters() {
   NATGW_COUNT=0
   REDSHIFT_COUNT=0
   ELB_COUNT=0
+  LAMBDA_COUNT=0
   WORKLOAD_COUNT=0
 }
 
@@ -238,8 +260,13 @@ reset_global_counters() {
   REDSHIFT_COUNT_GLOBAL=0
   NATGW_COUNT_GLOBAL=0
   ELB_COUNT_GLOBAL=0
+  LAMBDA_COUNT_GLOBAL=0
   WORKLOAD_COUNT_GLOBAL=0
   WORKLOAD_COUNT_GLOBAL_WITH_IAM_MODULE=0
+  LAMBDA_CREDIT_USAGE_GLOBAL=0
+  COMPUTE_CREDIT_USAGE_GLOBAL=0
+  CREDIT_USAGE_GLOBAL=0
+  CREDIT_USAGE_GLOBAL_WITH_IAM_MODULE=0
 }
 
 ##########################################################################################
@@ -319,11 +346,31 @@ count_account_resources() {
     echo "###################################################################################"
     echo ""
 
+    if [ "${WITH_CWP}" = "true" ]; then
+      echo "###################################################################################"
+      echo "Lambda Functions"
+      for i in "${REGION_LIST[@]}"
+      do
+        RESOURCE_COUNT=$(aws_lambda_get_account_settings "${i}" | jq '.AccountUsage.FunctionCount' 2>/dev/null)
+        echo " Count of Lambda Functions in Region ${i}: ${RESOURCE_COUNT}"
+        LAMBDA_COUNT=$((LAMBDA_COUNT + RESOURCE_COUNT))
+      done
+      echo "Total Lambda Functions across all regions: ${LAMBDA_COUNT}"
+      echo "###################################################################################"
+      echo ""
+    fi
+
     if [ "${USE_AWS_ORG}" = "true" ]; then
       WORKLOAD_COUNT=$((EC2_INSTANCE_COUNT + RDS_INSTANCE_COUNT + REDSHIFT_COUNT + NATGW_COUNT + ELB_COUNT))
       echo "###################################################################################"
-      echo "Member Account Totals"
-      echo "Total billable resources for Member Account ${ACCOUNT_NAME} ($ACCOUNT_ID): ${WORKLOAD_COUNT}"
+      echo "Totals for Member Account: ${ACCOUNT_NAME} ($ACCOUNT_ID)"
+      echo "CSPM: Total Billable Resources: ${WORKLOAD_COUNT}"
+
+      if [ "${WITH_CWP}" = "true" ]; then
+        LAMBDA_CREDIT_USAGE=$((LAMBDA_COUNT/6))
+        echo "CWP: Total Credit Consumption by ${LAMBDA_COUNT} Lambda Functions: ${LAMBDA_CREDIT_USAGE}"
+      fi
+
       echo "###################################################################################"
       echo ""
     fi
@@ -333,6 +380,7 @@ count_account_resources() {
     NATGW_COUNT_GLOBAL=$((NATGW_COUNT_GLOBAL + NATGW_COUNT))
     REDSHIFT_COUNT_GLOBAL=$((REDSHIFT_COUNT_GLOBAL + REDSHIFT_COUNT))
     ELB_COUNT_GLOBAL=$((ELB_COUNT_GLOBAL + ELB_COUNT))
+    LAMBDA_COUNT_GLOBAL=$((LAMBDA_COUNT_GLOBAL + LAMBDA_COUNT))
 
     reset_account_counters
 
@@ -343,17 +391,38 @@ count_account_resources() {
 
   WORKLOAD_COUNT_GLOBAL=$((EC2_INSTANCE_COUNT_GLOBAL + RDS_INSTANCE_COUNT_GLOBAL + NATGW_COUNT_GLOBAL + REDSHIFT_COUNT_GLOBAL + ELB_COUNT_GLOBAL))
   WORKLOAD_COUNT_GLOBAL_WITH_IAM_MODULE=$((WORKLOAD_COUNT_GLOBAL*125/100))
+  echo "###################################################################################"
+  echo "CSPM: Total Billable Resources:"
+  echo "  Count of EC2 Instances:     ${EC2_INSTANCE_COUNT_GLOBAL}"
+  echo "  Count of RDS Instances:     ${RDS_INSTANCE_COUNT_GLOBAL}"
+  echo "  Count of NAT Gateways:      ${NATGW_COUNT_GLOBAL}"
+  echo "  Count of RedShift Clusters: ${REDSHIFT_COUNT_GLOBAL}"
+  echo "  Count of ELBs:              ${ELB_COUNT_GLOBAL}"
+  echo ""
+  echo "CSPM: Total Credit Consumption: ${WORKLOAD_COUNT_GLOBAL}"
+  echo "(If using the IAM Security Module: ${WORKLOAD_COUNT_GLOBAL_WITH_IAM_MODULE})"
+  echo "###################################################################################"
 
-  echo "###################################################################################"
-  echo "Totals"
-  echo "  Count of EC2 Instances across all regions: ${EC2_INSTANCE_COUNT_GLOBAL}"
-  echo "  Count of RDS Instances across all regions: ${RDS_INSTANCE_COUNT_GLOBAL}"
-  echo "  Count of NAT Gateways across all regions: ${NATGW_COUNT_GLOBAL}"
-  echo "  Count of RedShift Clusters across all regions: ${REDSHIFT_COUNT_GLOBAL}"
-  echo "  Count of ELBs across all regions: ${ELB_COUNT_GLOBAL}"
-  echo "Total billable resources: ${WORKLOAD_COUNT_GLOBAL}"
-  echo "(If you will be using the IAM Security Module, total billable resources will be: ${WORKLOAD_COUNT_GLOBAL_WITH_IAM_MODULE})"
-  echo "###################################################################################"
+  if [ "${WITH_CWP}" = "true" ]; then
+    LAMBDA_CREDIT_USAGE_GLOBAL=$((LAMBDA_COUNT_GLOBAL/6))
+    COMPUTE_CREDIT_USAGE_GLOBAL=$((LAMBDA_CREDIT_USAGE_GLOBAL))
+    echo ""
+    echo "###################################################################################"
+    echo "CWP: Total Credit Consumption:"
+    echo "  By ${LAMBDA_COUNT_GLOBAL} Lambda Functions: ${LAMBDA_CREDIT_USAGE_GLOBAL}"
+    echo ""
+    echo "CWP: Total Credit Consumption: ${COMPUTE_CREDIT_USAGE_GLOBAL}"
+    echo "###################################################################################"
+    CREDIT_USAGE_GLOBAL=$((${WORKLOAD_COUNT_GLOBAL} + ${COMPUTE_CREDIT_USAGE_GLOBAL}))
+    CREDIT_USAGE_GLOBAL_WITH_IAM_MODULE=$((${WORKLOAD_COUNT_GLOBAL_WITH_IAM_MODULE} + ${COMPUTE_CREDIT_USAGE_GLOBAL}))
+    echo ""
+    echo "###################################################################################"
+    echo "Grand Total (CSPM + CPW) Credit Consumption: ${CREDIT_USAGE_GLOBAL}"
+    echo "(If using the IAM Security Module: ${CREDIT_USAGE_GLOBAL_WITH_IAM_MODULE})"
+    echo ""
+    echo "Totals are based upon resource counts at the time that this script is executed."
+    echo "###################################################################################"
+  fi
 }
 
 ##########################################################################################
