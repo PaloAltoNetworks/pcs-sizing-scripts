@@ -58,6 +58,20 @@ oci_compute_instances_list() {
   fi
 }
 
+oci_db_system_list(){
+  RESULT=$(oci db system list --all --compartment-id "${1}" --lifecycle-state "AVAILABLE" 2>/dev/null)
+  if [ $? -eq 0 ]; then
+    echo "${RESULT}"
+  fi
+}
+
+oci_load_balancer_list(){
+  RESULT=$(oci lb load-balancer list --all --compartment-id "${1}" --lifecycle-state "ACTIVE" 2>/dev/null)
+  if [ $? -eq 0 ]; then
+    echo "${RESULT}"
+  fi
+}
+
 ####
 
 get_compartments() {
@@ -72,11 +86,15 @@ get_compartments() {
 reset_local_counters() {
   COMPUTE_INSTANCES_COUNT=0
   WORKLOAD_COUNT=0
+  BARE_METAL_VM_DB_COUNT=0
+  LOAD_BALANCER_COUNT=0
 }
 
 reset_global_counters() {
   COMPUTE_INSTANCES_COUNT_GLOBAL=0
   WORKLOAD_COUNT_GLOBAL=0
+  BARE_METAL_VM_DB_COUNT_GLOBAL=0
+  LOAD_BALANCER_COUNT_GLOBAL=0
 }
 
 ##########################################################################################
@@ -94,20 +112,33 @@ count_resources() {
     RESOURCE_COUNT=$(oci_compute_instances_list "${COMPARTMENT}" | jq -r '.data[].id' 2>/dev/null | wc -l)
     COMPUTE_INSTANCES_COUNT=$((COMPUTE_INSTANCES_COUNT + RESOURCE_COUNT))
     echo "  Count of Compute Instances: ${COMPUTE_INSTANCES_COUNT}"
+    
+    RESOURCE_COUNT_VM=$(oci_db_system_list "${COMPARTMENT}" | jq -r '.data[].id' 2>/dev/null | wc -l)
+    BARE_METAL_VM_DB_COUNT=$((BARE_METAL_VM_DB_COUNT + RESOURCE_COUNT_VM))
+    echo " Count of Bare Metal VM Database Systems : ${BARE_METAL_VM_DB_COUNT}"
 
-    WORKLOAD_COUNT=$((COMPUTE_INSTANCES_COUNT + 0))
+    RESOURCE_COUNT_LB=$(oci_load_balancer_list "${COMPARTMENT}" | jq -r '.data[].id' 2>/dev/null | wc -l)
+    LOAD_BALANCER_COUNT=$((LOAD_BALANCER_COUNT + RESOURCE_COUNT_LB))
+    echo " Count of Load Balancers : ${LOAD_BALANCER_COUNT}"
+
+
+    WORKLOAD_COUNT=$((COMPUTE_INSTANCES_COUNT + LOAD_BALANCER_COUNT + BARE_METAL_VM_DB_COUNT))
     echo "Total billable resources for Compartment: ${WORKLOAD_COUNT}"
     echo "###################################################################################"
     echo ""
 
     COMPUTE_INSTANCES_COUNT_GLOBAL=$((COMPUTE_INSTANCES_COUNT_GLOBAL + COMPUTE_INSTANCES_COUNT))
+    BARE_METAL_VM_DB_COUNT_GLOBAL=$((BARE_METAL_VM_DB_COUNT_GLOBAL + BARE_METAL_VM_DB_COUNT))
+    LOAD_BALANCER_COUNT_GLOBAL=$((LOAD_BALANCER_COUNT_GLOBAL+LOAD_BALANCER_COUNT))
     reset_local_counters
   done
 
   echo "###################################################################################"
   echo "Totals"
   echo "  Count of Compute Instances: ${COMPUTE_INSTANCES_COUNT_GLOBAL}"
-  WORKLOAD_COUNT_GLOBAL=$((COMPUTE_INSTANCES_COUNT_GLOBAL + 0))
+  echo "  Count of Bare Metal VM DB Systems: ${BARE_METAL_VM_DB_COUNT_GLOBAL}"
+  echo "  Count of Load Balancers: ${LOAD_BALANCER_COUNT_GLOBAL}"
+  WORKLOAD_COUNT_GLOBAL=$((COMPUTE_INSTANCES_COUNT_GLOBAL + BARE_METAL_VM_DB_COUNT_GLOBAL + LOAD_BALANCER_COUNT_GLOBAL))
   echo "Total billable resources: ${WORKLOAD_COUNT_GLOBAL}"
   echo "###################################################################################"
 }
