@@ -46,6 +46,41 @@ EOJ
 EOJ
   }
 
+  oci_db_system_list() {
+    cat << EOJ
+{
+  "data": [
+    {
+      "id": "ocid1.dbsystem.123456789012",
+      "lifecycle-state": "AVAILABLE"
+    },
+    {
+      "id": "ocid1.dbsystem.234567891234",
+      "lifecycle-state": "AVAILABLE"
+    }
+  ]
+}
+EOJ
+  }
+
+  oci_load_balancer_list() {
+    cat << EOJ
+{
+  "data": [
+    {
+      "id": "ocid1.loadbalancer.123456789012",
+      "lifecycle-state": "ACTIVE"
+    },
+    {
+      "id": "ocid1.loadbalancer.234567891234",
+      "lifecycle-state": "ACTIVE"
+    }
+  ]
+}
+EOJ
+  }
+
+
   ########################################################################################
   # https://github.com/shellspec/shellspec#it-specify-example---example-block
   ########################################################################################
@@ -66,7 +101,7 @@ EOJ
     When call count_resources
     The output should include "Count"
     The variable TOTAL_COMPARTMENTS should eq 2
-    The variable WORKLOAD_COUNT_GLOBAL should eq 4
+    The variable WORKLOAD_COUNT_GLOBAL should eq 12
   End
 
 End

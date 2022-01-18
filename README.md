@@ -13,6 +13,11 @@ PDF licensing guide located here: [https://www.paloaltonetworks.com/resources/gu
 * [OCI](/oci)
 * [Alibaba](/alibaba)
 
-## Other credit usage:
+## Other Credit Usage:
 
 * [Code Security](/code-security)
+
+## Development Testing
+
+Please check your changes to the shell scripts with https://www.shellcheck.net/ 
+and update the associated spec tests in the `spec` directory, which use https://shellspec.info/

@@ -173,6 +173,17 @@ EOJ
 EOJ
   }
 
+  aws_lambda_get_account_settings() {
+    cat << EOJ
+{
+    "AccountLimit": {},
+    "AccountUsage": {
+       "FunctionCount": 4
+    }
+}
+EOJ
+  }
+
   ########################################################################################
   # https://github.com/shellspec/shellspec#it-specify-example---example-block
   ########################################################################################
