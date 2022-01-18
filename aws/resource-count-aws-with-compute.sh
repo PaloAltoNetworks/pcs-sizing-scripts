@@ -345,9 +345,12 @@ count_account_resources() {
     echo ""
 
     if [ "${USE_AWS_ORG}" = "true" ]; then
-      WORKLOAD_COUNT=$((EC2_INSTANCE_COUNT + RDS_INSTANCE_COUNT + REDSHIFT_COUNT + NATGW_COUNT + ELB_COUNT + LAMBDA_COUNT))
+      WORKLOAD_COUNT=$((EC2_INSTANCE_COUNT + RDS_INSTANCE_COUNT + REDSHIFT_COUNT + NATGW_COUNT + ELB_COUNT))
       echo "###################################################################################"
       echo "Member Account Totals"
+      echo "Count of Lambda Functions across all regions: ${LAMBDA_COUNT}"
+      echo "  ^ Every 6 Functions above is 1 Prisma Cloud credit: ${LAMBDA_CREDIT_USAGE} credits"
+      echo ""
       echo "Total billable resources for Member Account ${ACCOUNT_NAME} ($ACCOUNT_ID): ${WORKLOAD_COUNT}"
       echo "###################################################################################"
       echo ""
