@@ -39,7 +39,7 @@ fi
 ## Optionally query the AWS Organization by passing "org" as an argument.
 ##########################################################################################
 
-if [ "${1}X" == "orgX" ]; then
+if [ "${1}X" == "orgX" ] || [ "${2}X" == "orgX" ]; then
    USE_AWS_ORG="true"
 else
    USE_AWS_ORG="false"
@@ -49,7 +49,7 @@ fi
 ## Optionally report on Compute by passing "cwp" as an argument.
 ##########################################################################################
 
-if [ "${1}X" == "cwpX" ]; then
+if [ "${1}X" == "cwpX" ] || [ "${2}X" = "cwpX" ]; then
    WITH_CWP="true"
 else
    WITH_CWP="false"
