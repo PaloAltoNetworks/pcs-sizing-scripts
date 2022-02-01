@@ -51,6 +51,14 @@ The script can collect sizing information for Prisma Cloud Compute (CWP, aka Clo
 
 Currently, this is limited to counting AWS Lambda Functions.
 
+## Running the Script from AWS Cloud Shell
+
+1. Start a Cloud Shell session from the AWS UI, which should have the AWS CLI tool, your credentials, ```git``` and ``jq`` already prepared
+2. Clone this repository, e.g. ```git clone https://github.com/PaloAltoNetworks/pcs-sizing-scripts.git```
+3. ```cd pcs-sizing-scripts/aws```
+4. ```chmod +x  resource-count-aws.sh```
+5. ```./resource-count-aws.sh```
+
 ## Running the Script on Windows
 
 ### Prerequisites on Windows
