@@ -290,7 +290,7 @@ count_account_resources() {
     echo "Running EC2 Instances"
     for i in "${REGION_LIST[@]}"
     do
-      RESOURCE_COUNT=$(aws_ec2_describe_instances "${i}" | jq '.[] | length' 2>/dev/null)
+      RESOURCE_COUNT=$(aws_ec2_describe_instances "${i}" | jq '[ .Reservations[].Instances[] ] | length' 2>/dev/null)
       echo "  Count of Running EC2 Instances in Region ${i}: ${RESOURCE_COUNT}"
       EC2_INSTANCE_COUNT=$((EC2_INSTANCE_COUNT + RESOURCE_COUNT))
     done

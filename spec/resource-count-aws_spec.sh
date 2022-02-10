@@ -44,18 +44,18 @@ EOJ
   aws_organizations_describe_organization() {
     cat << EOJ
 {
-	"Organization": {
-		"MasterAccountArn": "arn:aws:organizations::011111111111:account/o-exampleorgid/011111111111",
-		"MasterAccountEmail": "bill@example.com",
-		"MasterAccountId": "011111111111",
-		"Id": "o-exampleorgid",
-		"FeatureSet": "ALL",
-		"Arn": "arn:aws:organizations::011111111111:organization/o-exampleorgid",
-		"AvailablePolicyTypes": [{
-			"Status": "ENABLED",
-			"Type": "SERVICE_CONTROL_POLICY"
-		}]
-	}
+    "Organization": {
+        "MasterAccountArn": "arn:aws:organizations::011111111111:account/o-exampleorgid/011111111111",
+        "MasterAccountEmail": "bill@example.com",
+        "MasterAccountId": "011111111111",
+        "Id": "o-exampleorgid",
+        "FeatureSet": "ALL",
+        "Arn": "arn:aws:organizations::011111111111:organization/o-exampleorgid",
+        "AvailablePolicyTypes": [{
+            "Status": "ENABLED",
+            "Type": "SERVICE_CONTROL_POLICY"
+        }]
+    }
 }
 EOJ
   }
@@ -63,43 +63,43 @@ EOJ
   aws_organizations_list_accounts() {
     cat << EOJ
 {
-	"Accounts": [{
-			"Arn": "arn:aws:organizations::011111111111:account/o-exampleorgid/011111111111",
-			"JoinedMethod": "INVITED",
-			"JoinedTimestamp": 1481830215.45,
-			"Id": "011111111111",
-			"Name": "MasterAccount",
-			"Email": "bill@example.com",
-			"Status": "ACTIVE"
-		},
-		{
-			"Arn": "arn:aws:organizations::011111111111:account/o-exampleorgid/222222222222",
-			"JoinedMethod": "INVITED",
-			"JoinedTimestamp": 1481835741.044,
-			"Id": "222222222222",
-			"Name": "ProductionAccount",
-			"Email": "alice@example.com",
-			"Status": "ACTIVE"
-		},
-		{
-			"Arn": "arn:aws:organizations::011111111111:account/o-exampleorgid/333333333333",
-			"JoinedMethod": "INVITED",
-			"JoinedTimestamp": 1481835795.536,
-			"Id": "333333333333",
-			"Name": "DevelopmentAccount",
-			"Email": "juan@example.com",
-			"Status": "ACTIVE"
-		},
-		{
-			"Arn": "arn:aws:organizations::011111111111:account/o-exampleorgid/444444444444",
-			"JoinedMethod": "INVITED",
-			"JoinedTimestamp": 1481835812.143,
-			"Id": "444444444444",
-			"Name": "TestAccount",
-			"Email": "anika@example.com",
-			"Status": "ACTIVE"
-		}
-	]
+    "Accounts": [{
+            "Arn": "arn:aws:organizations::011111111111:account/o-exampleorgid/011111111111",
+            "JoinedMethod": "INVITED",
+            "JoinedTimestamp": 1481830215.45,
+            "Id": "011111111111",
+            "Name": "MasterAccount",
+            "Email": "bill@example.com",
+            "Status": "ACTIVE"
+        },
+        {
+            "Arn": "arn:aws:organizations::011111111111:account/o-exampleorgid/222222222222",
+            "JoinedMethod": "INVITED",
+            "JoinedTimestamp": 1481835741.044,
+            "Id": "222222222222",
+            "Name": "ProductionAccount",
+            "Email": "alice@example.com",
+            "Status": "ACTIVE"
+        },
+        {
+            "Arn": "arn:aws:organizations::011111111111:account/o-exampleorgid/333333333333",
+            "JoinedMethod": "INVITED",
+            "JoinedTimestamp": 1481835795.536,
+            "Id": "333333333333",
+            "Name": "DevelopmentAccount",
+            "Email": "juan@example.com",
+            "Status": "ACTIVE"
+        },
+        {
+            "Arn": "arn:aws:organizations::011111111111:account/o-exampleorgid/444444444444",
+            "JoinedMethod": "INVITED",
+            "JoinedTimestamp": 1481835812.143,
+            "Id": "444444444444",
+            "Name": "TestAccount",
+            "Email": "anika@example.com",
+            "Status": "ACTIVE"
+        }
+    ]
 }
 EOJ
   }
@@ -126,9 +126,23 @@ EOJ
   aws_ec2_describe_instances() {
     cat << EOJ
 {
-	"Instances": [{
-		"InstanceId": "0abcdef1234567890"
-	}]
+    "Reservations": [{
+            "Groups": [],
+            "Instances": [{
+                    "InstanceId": "0abcdef1234567890"
+                },
+                {
+                    "InstanceId": "0abcdef1234567891"
+                }
+            ]
+        },
+        {
+            "Groups": [],
+            "Instances": [{
+                "InstanceId": "1abcdef1234567890"
+            }]
+        }
+    ]
 }
 EOJ
   }
@@ -136,9 +150,9 @@ EOJ
   aws_ec2_describe_db_instances() {
     cat << EOJ
 {
-	"Instances": [{
-		"InstanceId": "0abcdef1234567890"
-	}]
+    "Instances": [{
+        "InstanceId": "0abcdef1234567890"
+    }]
 }
 EOJ
   }
@@ -146,9 +160,9 @@ EOJ
   aws_ec2_describe_nat_gateways() {
     cat << EOJ
 {
-	"Instances": [{
-		"InstanceId": "0abcdef1234567890"
-	}]
+    "Instances": [{
+        "InstanceId": "0abcdef1234567890"
+    }]
 }
 EOJ
   }
@@ -156,9 +170,9 @@ EOJ
   aws_redshift_describe_clusters() {
     cat << EOJ
 {
-	"Instances": [{
-		"InstanceId": "0abcdef1234567890"
-	}]
+    "Instances": [{
+        "InstanceId": "0abcdef1234567890"
+    }]
 }
 EOJ
   }
@@ -166,9 +180,9 @@ EOJ
   aws_elb_describe_load_balancers() {
     cat << EOJ
 {
-	"Instances": [{
-		"InstanceId": "0abcdef1234567890"
-	}]
+    "Instances": [{
+        "InstanceId": "0abcdef1234567890"
+    }]
 }
 EOJ
   }
@@ -271,8 +285,8 @@ EOJ
     When call count_account_resources
     The output should include "Count"
     The variable TOTAL_ACCOUNTS should eq 1
-    The variable WORKLOAD_COUNT_GLOBAL should eq 20
-    The variable WORKLOAD_COUNT_GLOBAL_WITH_IAM_MODULE should eq 25
+    The variable WORKLOAD_COUNT_GLOBAL should eq 28
+    The variable WORKLOAD_COUNT_GLOBAL_WITH_IAM_MODULE should eq 35
   End
 
   It 'counts organization member account resources'
@@ -285,8 +299,8 @@ EOJ
     When call count_account_resources
     The output should include "Count"
     The variable TOTAL_ACCOUNTS should eq 4
-    The variable WORKLOAD_COUNT_GLOBAL should eq 80
-    The variable WORKLOAD_COUNT_GLOBAL_WITH_IAM_MODULE should eq 100
+    The variable WORKLOAD_COUNT_GLOBAL should eq 112
+    The variable WORKLOAD_COUNT_GLOBAL_WITH_IAM_MODULE should eq 140
   End
 
   It 'counts compute resources'
