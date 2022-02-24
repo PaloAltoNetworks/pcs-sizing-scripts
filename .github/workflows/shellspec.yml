@@ -17,4 +17,4 @@ jobs:
       - name: install shellspec
         run: curl -fsSL https://git.io/shellspec | sh -s -- --yes
       - name: run shellspec using bash
-        run: bash shellspec spec/*.spec
+        run: bash shellspec --pattern '*.spec' spec
