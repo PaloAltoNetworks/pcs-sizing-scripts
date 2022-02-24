@@ -9,10 +9,10 @@ on:
   workflow_dispatch:
 
 jobs:
-  build:
+  shellspec:
+    name: shellspec
     runs-on: ubuntu-latest
     steps:
-      # Checkout the repository under $GITHUB_WORKSPACE so this job can access it:
       - uses: actions/checkout@v2
       - name: install shellspec
         run: curl -fsSL https://git.io/shellspec | sh -s -- --yes
