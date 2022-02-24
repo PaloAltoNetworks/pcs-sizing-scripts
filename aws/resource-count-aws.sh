@@ -501,10 +501,10 @@ count_account_resources() {
     echo ""
     echo "###################################################################################"
   fi
-}
 
-echo "If any questions/concerns, please see the following licensing PDF:"
-echo "https://www.paloaltonetworks.com/resources/guides/prisma-cloud-enterprise-edition-licensing-guide"
+  echo "If you have any questions/concerns, please see the following licensing guide:"
+  echo "https://www.paloaltonetworks.com/resources/guides/prisma-cloud-enterprise-edition-licensing-guide"
+}
 
 ##########################################################################################
 # Allow shellspec to source this script.
