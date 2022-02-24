@@ -198,6 +198,20 @@ EOJ
 EOJ
   }
 
+  aws_s3api_list_buckets() {
+    cat << EOJ
+    [
+      "testing123",
+      "fakebucket456",
+      "notyours789"
+    ]
+EOJ
+  }
+
+  aws_s3_ls_bucket_size() {
+    echo "423451539000"
+  }  
+
   ########################################################################################
   # https://github.com/shellspec/shellspec#it-specify-example---example-block
   ########################################################################################
@@ -270,6 +284,16 @@ EOJ
     The output should not include "Error"
   End
 
+  It 'returns a list of S3 buckets'
+    When call aws_s3api_list_buckets
+    The output should not include "Error"
+  End
+
+  It 'returns the size of a single bucket'
+    When call aws_s3_ls_bucket_size
+    The output should not include "-1"
+  End
+
   ########################################################################################
   # Note that resource totals are the result of the other mock api calls being called four times,
   # as a result of the mock api region call returning four regions. 
@@ -315,6 +339,21 @@ EOJ
     The output should include "Count"
     The variable LAMBDA_COUNT_GLOBAL should eq 12
     The variable LAMBDA_CREDIT_USAGE_GLOBAL should eq 2
+  End
+
+  It 'counts data size'
+    USE_AWS_ORG="false"
+    WITH_DATA="true"
+    get_account_list > /dev/null 2>&1
+    get_region_list  > /dev/null 2>&1
+    reset_account_counters
+    reset_global_counters
+    #
+    When call count_account_resources
+    The output should include "Count"
+    The variable BUCKETS_USAGE_GIG_GLOBAL should eq 1270
+    The variable BUCKETS_CREDIT_FULL_USAGE_GLOBAL should eq 38
+    The variable BUCKETS_CREDIT_EXPOSURE_USAGE_GLOBAL should eq 6
   End
 
 End
