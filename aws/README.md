@@ -23,6 +23,8 @@ The below AWS APIs need to be enabled in order to gather information from AWS.
 * aws redshift describe-clusters
 * aws elb describe-load-balancer
 * aws lambda get-account-settings (optional, when running as `resource-count-aws.sh cwp`)
+* aws s3api list-buckets (optional, when running as `resource-count-aws.sh data`)
+* aws s3api list-objects (optional, when running as `resource-count-aws.sh data`)
 
 ## AWS Organization Support
 
@@ -47,9 +49,20 @@ https://docs.aws.amazon.com/organizations/latest/userguide/orgs_manage_accounts_
 
 ## Compute Support
 
-The script can collect sizing information for Prisma Cloud Compute (CWP, aka Cloud Workload Protection) by specifying `cwp` as a parameter.
+The script can collect sizing information for Prisma Cloud Compute (CWP, aka Cloud Workload Protection) by specifying `cwp` as a parameter (Can be combined with other flags).
+
+* Example ```./resource-count-aws.sh cwp```
+
 
 Currently, this is limited to counting AWS Lambda Functions.
+
+## Data Security Support
+
+The script can collect sizing information for Prisma Cloud Data Security (PCDS) by specifying `data` as a parameter (Can be combined with other flags).
+
+**NOTE: With this flag enabled, the script can take a while to run depending on the amount of data within your S3 bucket**
+
+* Example ```./resource-count-aws.sh data```
 
 ## Running the Script from AWS Cloud Shell
 

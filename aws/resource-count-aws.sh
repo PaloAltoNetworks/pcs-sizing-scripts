@@ -24,6 +24,8 @@
 # - aws redshift describe-clusters
 # - aws elb describe-load-balancer
 # - aws lambda get-account-settings (optional)
+# - aws s3api list-buckets (optional)
+# - aws s3api list-objects (optional)
 ##########################################################################################
 
 ##########################################################################################
@@ -39,7 +41,7 @@ fi
 ## Optionally query the AWS Organization by passing "org" as an argument.
 ##########################################################################################
 
-if [ "${1}X" == "orgX" ] || [ "${2}X" == "orgX" ]; then
+if [ "${1}X" == "orgX" ] || [ "${2}X" == "orgX" ] || [ "${3}X" == "orgX" ]; then
    USE_AWS_ORG="true"
 else
    USE_AWS_ORG="false"
@@ -49,12 +51,22 @@ fi
 ## Optionally report on Compute by passing "cwp" as an argument.
 ##########################################################################################
 
-if [ "${1}X" == "cwpX" ] || [ "${2}X" = "cwpX" ]; then
+if [ "${1}X" == "cwpX" ] || [ "${2}X" = "cwpX" ] || [ "${3}X" == "cwpX" ]; then
    WITH_CWP="true"
 else
    WITH_CWP="false"
 fi
 
+##########################################################################################
+## Optionally report on S3 Bucket Size by passing "data" as an argument.
+## NOTE: This can take a long time depending on the size of your buckets
+##########################################################################################
+
+if [ "${1}X" == "dataX" ] || [ "${2}X" = "dataX" ] || [ "${3}X" == "dataX" ]; then
+   WITH_DATA="true"
+else
+   WITH_DATA="false"
+fi
 
 ##########################################################################################
 ## Utility functions.
@@ -157,6 +169,25 @@ aws_lambda_get_account_settings() {
   fi
 }
 
+aws_s3api_list_buckets() {
+  RESULT=$(aws s3api list-buckets --query "Buckets[].Name[]" --output json 2>/dev/null)
+  if [ $? -eq 0 ]; then
+    echo "${RESULT}"
+  else
+    echo '{"Error": [] }'
+  fi
+}
+
+aws_s3_ls_bucket_size() {
+  RESULT=$(aws s3api list-objects --bucket "${1}" --output json --query "sum(Contents[].Size)" 2>/dev/null)
+  if [ $? -eq 0 ]; then
+    echo "${RESULT}"
+  else
+    echo '-1'
+  fi
+}
+        
+
 ####
 
 get_region_list() {
@@ -176,6 +207,26 @@ get_region_list() {
   fi
 
   echo "  Total number of regions: ${#REGION_LIST[@]}"
+  echo "###################################################################################"
+  echo ""
+}
+
+get_bucket_list() {
+  echo "###################################################################################"
+  echo "Querying S3 buckets"
+
+  BUCKETS=$(aws_s3api_list_buckets | jq -r '.[]' 2>/dev/null)
+
+  XIFS=$IFS
+  # shellcheck disable=SC2206
+  IFS=$'\n' BUCKET_LIST=($BUCKETS)
+  IFS=$XIFS
+
+  if [ ${#BUCKET_LIST[@]} -eq 0 ]; then
+    echo "  Warning: Could not query S3 buckets"
+  fi
+
+  echo "  Total number of buckets: ${#BUCKET_LIST[@]}"
   echo "###################################################################################"
   echo ""
 }
@@ -251,6 +302,9 @@ reset_account_counters() {
   REDSHIFT_COUNT=0
   ELB_COUNT=0
   LAMBDA_COUNT=0
+  # shellcheck disable=SC2178
+  BUCKET_LIST=[]
+  BUCKETS_SIZE=0
   WORKLOAD_COUNT=0
 }
 
@@ -261,12 +315,11 @@ reset_global_counters() {
   NATGW_COUNT_GLOBAL=0
   ELB_COUNT_GLOBAL=0
   LAMBDA_COUNT_GLOBAL=0
+  BUCKETS_SIZE_GLOBAL=0
   WORKLOAD_COUNT_GLOBAL=0
   WORKLOAD_COUNT_GLOBAL_WITH_IAM_MODULE=0
   LAMBDA_CREDIT_USAGE_GLOBAL=0
   COMPUTE_CREDIT_USAGE_GLOBAL=0
-  CREDIT_USAGE_GLOBAL=0
-  CREDIT_USAGE_GLOBAL_WITH_IAM_MODULE=0
 }
 
 ##########################################################################################
@@ -277,8 +330,8 @@ count_account_resources() {
   for ((ACCOUNT_INDEX=0; ACCOUNT_INDEX<=(TOTAL_ACCOUNTS-1); ACCOUNT_INDEX++))
   do
     if [ "${USE_AWS_ORG}" = "true" ]; then
-      ACCOUNT_NAME=$(echo "${ACCOUNT_LIST}" | jq -r .Accounts[$ACCOUNT_INDEX].Name 2>/dev/null)
-      ACCOUNT_ID=$(echo "${ACCOUNT_LIST}"   | jq -r .Accounts[$ACCOUNT_INDEX].Id   2>/dev/null)
+      ACCOUNT_NAME=$(echo "${ACCOUNT_LIST}" | jq -r .Accounts["${ACCOUNT_INDEX}"].Name 2>/dev/null)
+      ACCOUNT_ID=$(echo "${ACCOUNT_LIST}"   | jq -r .Accounts["${ACCOUNT_INDEX}"].Id   2>/dev/null)
       ASSUME_ROLE_ERROR=""
       assume_role "${ACCOUNT_NAME}" "${ACCOUNT_ID}"
       if [ -n "${ASSUME_ROLE_ERROR}" ]; then
@@ -360,6 +413,21 @@ count_account_resources() {
       echo ""
     fi
 
+    if [ "${WITH_DATA}" = "true" ]; then
+      echo "###################################################################################"
+      echo "S3 Bucket sizes"
+      get_bucket_list
+      for i in "${BUCKET_LIST[@]}"
+        do
+        BUCKET_SIZE=$(aws_s3_ls_bucket_size "${i}" 2>/dev/null) 
+        echo "Total size of bucket ${i}: ${BUCKET_SIZE}"
+        BUCKETS_SIZE=$((BUCKETS_SIZE + BUCKET_SIZE))
+      done
+      echo "Total S3 Buckets size: ${BUCKETS_SIZE}"
+      echo "###################################################################################"
+      echo ""
+    fi
+
     if [ "${USE_AWS_ORG}" = "true" ]; then
       WORKLOAD_COUNT=$((EC2_INSTANCE_COUNT + RDS_INSTANCE_COUNT + REDSHIFT_COUNT + NATGW_COUNT + ELB_COUNT))
       echo "###################################################################################"
@@ -375,12 +443,15 @@ count_account_resources() {
       echo ""
     fi
 
+
     EC2_INSTANCE_COUNT_GLOBAL=$((EC2_INSTANCE_COUNT_GLOBAL + EC2_INSTANCE_COUNT))
     RDS_INSTANCE_COUNT_GLOBAL=$((RDS_INSTANCE_COUNT_GLOBAL + RDS_INSTANCE_COUNT))
     NATGW_COUNT_GLOBAL=$((NATGW_COUNT_GLOBAL + NATGW_COUNT))
     REDSHIFT_COUNT_GLOBAL=$((REDSHIFT_COUNT_GLOBAL + REDSHIFT_COUNT))
     ELB_COUNT_GLOBAL=$((ELB_COUNT_GLOBAL + ELB_COUNT))
     LAMBDA_COUNT_GLOBAL=$((LAMBDA_COUNT_GLOBAL + LAMBDA_COUNT))
+    BUCKETS_SIZE_GLOBAL=$((BUCKETS_SIZE_GLOBAL + BUCKETS_SIZE))
+
 
     reset_account_counters
 
@@ -401,6 +472,8 @@ count_account_resources() {
   echo ""
   echo "CSPM: Total Credit Consumption: ${WORKLOAD_COUNT_GLOBAL}"
   echo "(If using the IAM Security Module: ${WORKLOAD_COUNT_GLOBAL_WITH_IAM_MODULE})"
+  echo ""
+  echo "Totals are based upon resource counts at the time that this script is executed."
   echo "###################################################################################"
 
   if [ "${WITH_CWP}" = "true" ]; then
@@ -408,22 +481,30 @@ count_account_resources() {
     COMPUTE_CREDIT_USAGE_GLOBAL=$((LAMBDA_CREDIT_USAGE_GLOBAL))
     echo ""
     echo "###################################################################################"
-    echo "CWP: Total Credit Consumption:"
+    echo "CWP Total Credit Consumption:"
     echo "  By ${LAMBDA_COUNT_GLOBAL} Lambda Functions: ${LAMBDA_CREDIT_USAGE_GLOBAL}"
     echo ""
-    echo "CWP: Total Credit Consumption: ${COMPUTE_CREDIT_USAGE_GLOBAL}"
-    echo "###################################################################################"
-    CREDIT_USAGE_GLOBAL=$((${WORKLOAD_COUNT_GLOBAL} + ${COMPUTE_CREDIT_USAGE_GLOBAL}))
-    CREDIT_USAGE_GLOBAL_WITH_IAM_MODULE=$((${WORKLOAD_COUNT_GLOBAL_WITH_IAM_MODULE} + ${COMPUTE_CREDIT_USAGE_GLOBAL}))
+    echo "CWP Total Credit Consumption: ${COMPUTE_CREDIT_USAGE_GLOBAL}"
     echo ""
     echo "###################################################################################"
-    echo "Grand Total (CSPM + CPW) Credit Consumption: ${CREDIT_USAGE_GLOBAL}"
-    echo "(If using the IAM Security Module: ${CREDIT_USAGE_GLOBAL_WITH_IAM_MODULE})"
+  fi
+
+  if [ "${WITH_DATA}" = "true" ]; then
+    BUCKETS_USAGE_GIG_GLOBAL=$((BUCKETS_SIZE_GLOBAL/1000/1000/1000))
+    BUCKETS_CREDIT_FULL_USAGE_GLOBAL=$((BUCKETS_USAGE_GIG_GLOBAL/33))
+    BUCKETS_CREDIT_EXPOSURE_USAGE_GLOBAL=$((BUCKETS_USAGE_GIG_GLOBAL/200))
     echo ""
-    echo "Totals are based upon resource counts at the time that this script is executed."
+    echo "###################################################################################"
+    echo "Data Security Total Credit Consumption:"
+    echo "  If choosing Full Scan: ${BUCKETS_CREDIT_FULL_USAGE_GLOBAL}"
+    echo "  If choosing Exposure Scan: ${BUCKETS_CREDIT_EXPOSURE_USAGE_GLOBAL}"
+    echo ""
     echo "###################################################################################"
   fi
 }
+
+echo "If any questions/concerns, please see the following licensing PDF:"
+echo "https://www.paloaltonetworks.com/resources/guides/prisma-cloud-enterprise-edition-licensing-guide"
 
 ##########################################################################################
 # Allow shellspec to source this script.
