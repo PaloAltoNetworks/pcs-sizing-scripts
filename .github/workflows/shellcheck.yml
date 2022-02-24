@@ -17,4 +17,4 @@ jobs:
       - name: run shellcheck
         uses: ludeeus/action-shellcheck@master
         with:
-         ignore_paths: './spec'
+         ignore_paths: spec
