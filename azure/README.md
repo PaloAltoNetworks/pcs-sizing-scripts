@@ -2,7 +2,7 @@
 
 ## Overview
 
-This document describes how to prepare for, and how to run the Prisma Cloud Azure License Sizing Script.
+This document describes how to prepare for and run the Prisma Cloud Azure License Sizing Script.
 
 ## Prerequisites
 
@@ -12,15 +12,15 @@ The Azure account that is used to run the sizing script must have the required p
 
 ### Required Azure APIs
 
-The below Azure APIs need to be enabled in order to gather information from Azure.
+The Azure APIs below need to be enabled in order to gather information from Azure.
 
-* az account list
-* az resource list
-* az vm list
+* `az account list`
+* `az resource list`
+* `az vm list`
 
 ## Running the Script
 
-Follow the steps below to run the g script.
+Follow the steps below to run the script.
 
 1. Download the sizing script to your local computer
     1. [resource-count-azure.py](resource-count-azure.py)
