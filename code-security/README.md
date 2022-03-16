@@ -76,6 +76,7 @@ Create a file named _repos.txt_ with a list of repository paths on your system.
 ```
 
 Then run the following command (replace __COMMAND__ with one of the commands from above):
+
 `cat repos.txt | while read d; do cd $d; __COMMAND__; cd -; done | awk '{s += $1} END {print s}'`
 
 ##### If you have _jq_ installed (recommended)
@@ -85,6 +86,7 @@ Example (using the _jq_ command):
 
 ##### If you do not have _jq_ installed
 Example (**without** using _jq_)
+
 `cat repos.txt | while read d; do cd $d; checkov -d . --download-external-modules true -o json | grep resource_count | awk '{print substr($2, 0, length($2) - 1)}' | awk '{s += $1} END {print s}'; cd -; done | awk '{s += $1} END {print s}' | awk '{print "Total resource count:"};{print int};{print "Code Security credit usage (total resources divded by 3):"};{printf "%0.0f\n",int/3 " credits "}'`
 
 Example output:
