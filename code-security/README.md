@@ -10,26 +10,30 @@
 
 #### If you have _jq_ installed (recommended)
 
-`checkov -d . --download-external-modules true -o json | jq 'if type=="array" then . else [.] end | [.[].summary.resource_count] | add' | awk '{print "Total resource count:"};{print int};{print "Code Security credit usage (total resources divded by 3):"};{printf "%0.0f\n",int/3 " credits "}'`
+```console
+checkov -d . --download-external-modules true -o json | jq 'if type=="array" then . else [.] end | [.[].summary.resource_count] | add' | awk '{bc=$1 ; pc=($1/3); printf "Total resource count: " ; printf"%0.0f\n", bc ; {printf "Code Security credit usage (total resources divded by 3): "}; printf"%0.0f\n", pc}';
+```
 
 #### If you do not have _jq_ installed
 
-`checkov -d . --download-external-modules true -o json | grep resource_count | awk '{print substr($2, 0, length($2) - 1)}' | awk '{s += $1} END {print s}' | awk '{print "Total resource count:"};{print int};{print "Code Security credit usage (total resources divded by 3):"};{printf "%0.0f\n",int/3 " credits "}'`
+```console
+checkov -d . --download-external-modules true -o json | grep resource_count | awk '{print substr($2, 0, length($2) - 1)}' | awk '{s += $1} END {print s}' | awk '{bc=$1 ; pc=($1/3); printf "Total resource count: " ; printf"%0.0f\n", bc ; {printf "Code Security credit usage (total resources divded by 3): "}; printf"%0.0f\n", pc}';
+```
 
 Example output:
 
 ```
-Total resource count:
-160
-Code Security credit usage (total resources divded by 3):
-53
+Total resource count: 160
+Code Security credit usage (total resources divded by 3): 53
 ```
 There are a total of 160 resources, or 53 credits to be consumed by the scanned repo
 
 
 #### On Windows/Powershell (_jq_ not required):
-`((checkov -d . --download-external-modules true -o json)| convertFrom-Json).summary.resource_count`
-`5`
+```console
+((checkov -d . --download-external-modules true -o json)| convertFrom-Json).summary.resource_count
+5
+``
 
 The resource count for the repo is 5.
 
@@ -40,27 +44,31 @@ The resource count for the repo is 5.
 
 Clone all the repos under the same top-level directory. Then run the following command (replace __COMMAND__ with one of the commands from above).
 
-`for d in $(ls); do cd $d; COMMAND; cd -; done | awk '{s += $1} END {print s}' | awk '{print "Total resource count:"};{print int};{print "Code Security credit usage (total resources divded by 3):"};{printf "%0.0f\n",int/3 " credits "}'`
+```console
+for d in $(ls); do cd $d; COMMAND; cd -; done | awk '{s += $1} END {print s}' | awk '{bc=$1 ; pc=($1/3); printf "Total resource count: " ; printf"%0.0f\n", bc ; {printf "Code Security credit usage (total resources divded by 3): "}; printf"%0.0f\n", pc}';
+```
 
 ##### If you have _jq_ installed (recommended)
 
 Example (using the _jq_ command):
 
-`for d in $(ls); do cd $d; checkov -d . --download-external-modules true -o json | jq 'if type=="array" then . else [.] end | [.[].summary.resource_count] | add'; cd -; done | awk '{s += $1} END {print s}' | awk '{print "Total resource count:"};{print int};{print "Code Security credit usage (total resources divded by 3):"};{printf "%0.0f\n",int/3 " credits "}'`
+```console
+for d in $(ls); do cd $d; checkov -d . --download-external-modules true -o json | jq 'if type=="array" then . else [.] end | [.[].summary.resource_count] | add'; cd -; done | awk '{s += $1} END {print s}' | awk '{bc=$1 ; pc=($1/3); printf "Total resource count: " ; printf"%0.0f\n", bc ; {printf "Code Security credit usage (total resources divded by 3): "}; printf"%0.0f\n", pc}';
+```
 
 ##### If you do not have _jq_ installed
 
 Example (**without** using _jq_)
 
-`for d in $(ls); do cd $d; checkov -d . --download-external-modules true -o json | grep resource_count | awk '{print substr($2, 0, length($2) - 1)}' | awk '{s += $1} END {print s}'; cd -; done | awk '{s += $1} END {print s}' | awk '{print "Total resource count:"};{print int};{print "Code Security credit usage (total resources divded by 3):"};{printf "%0.0f\n",int/3 " credits "}'`
+```console
+for d in $(ls); do cd $d; checkov -d . --download-external-modules true -o json | grep resource_count | awk '{print substr($2, 0, length($2) - 1)}' | awk '{s += $1} END {print s}'; cd -; done | awk '{s += $1} END {print s}' | awk '{bc=$1 ; pc=($1/3); printf "Total resource count: " ; printf"%0.0f\n", bc ; {printf "Code Security credit usage (total resources divded by 3): "}; printf"%0.0f\n", pc}';
+```
 
 Example output:
 
 ```
-Total resource count:
-277
-Code Security credit usage (total resources divded by 3):
-92
+Total resource count: 277
+Code Security credit usage (total resources divded by 3): 92
 ```
 
 There are a total of 277 resources, or 92 credits to be consumed by the scanned repos
