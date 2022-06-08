@@ -33,7 +33,7 @@ There are a total of 160 resources, or 53 credits to be consumed by the scanned 
 ```console
 ((checkov -d . --download-external-modules true -o json)| convertFrom-Json).summary.resource_count
 5
-``
+```
 
 The resource count for the repo is 5.
 
