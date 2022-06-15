@@ -10,13 +10,13 @@
 
 #### If you have _jq_ installed (recommended)
 
-```console
+```
 checkov -d . --download-external-modules true -o json | jq 'if type=="array" then . else [.] end | [.[].summary.resource_count] | add' | awk '{bc=$1 ; pc=($1/3); printf "Total resource count: " ; printf"%0.0f\n", bc ; {printf "Code Security credit usage (total resources divided by 3): "}; printf"%0.0f\n", pc}';
 ```
 
 #### If you do not have _jq_ installed
 
-```console
+```
 checkov -d . --download-external-modules true -o json | grep resource_count | awk '{print substr($2, 0, length($2) - 1)}' | awk '{s += $1} END {print s}' | awk '{bc=$1 ; pc=($1/3); printf "Total resource count: " ; printf"%0.0f\n", bc ; {printf "Code Security credit usage (total resources divided by 3): "}; printf"%0.0f\n", pc}';
 ```
 
@@ -30,7 +30,7 @@ There are a total of 160 resources, or 53 credits to be consumed by the scanned 
 
 
 #### On Windows/Powershell (_jq_ not required):
-```console
+```
 ((checkov -d . --download-external-modules true -o json)| convertFrom-Json).summary.resource_count
 5
 ```
@@ -44,7 +44,7 @@ The resource count for the repo is 5.
 
 Clone all the repos under the same top-level directory. Then run the following command (replace __COMMAND__ with one of the commands from above).
 
-```console
+```
 for d in $(ls); do cd $d; COMMAND; cd -; done | awk '{s += $1} END {print s}' | awk '{bc=$1 ; pc=($1/3); printf "Total resource count: " ; printf"%0.0f\n", bc ; {printf "Code Security credit usage (total resources divided by 3): "}; printf"%0.0f\n", pc}';
 ```
 
@@ -52,7 +52,7 @@ for d in $(ls); do cd $d; COMMAND; cd -; done | awk '{s += $1} END {print s}' | 
 
 Example (using the _jq_ command):
 
-```console
+```
 for d in $(ls); do cd $d; checkov -d . --download-external-modules true -o json | jq 'if type=="array" then . else [.] end | [.[].summary.resource_count] | add'; cd -; done | awk '{s += $1} END {print s}' | awk '{bc=$1 ; pc=($1/3); printf "Total resource count: " ; printf"%0.0f\n", bc ; {printf "Code Security credit usage (total resources divided by 3): "}; printf"%0.0f\n", pc}';
 ```
 
@@ -60,7 +60,7 @@ for d in $(ls); do cd $d; checkov -d . --download-external-modules true -o json 
 
 Example (**without** using _jq_)
 
-```console
+```
 for d in $(ls); do cd $d; checkov -d . --download-external-modules true -o json | grep resource_count | awk '{print substr($2, 0, length($2) - 1)}' | awk '{s += $1} END {print s}'; cd -; done | awk '{s += $1} END {print s}' | awk '{bc=$1 ; pc=($1/3); printf "Total resource count: " ; printf"%0.0f\n", bc ; {printf "Code Security credit usage (total resources divided by 3): "}; printf"%0.0f\n", pc}';
 ```
 
