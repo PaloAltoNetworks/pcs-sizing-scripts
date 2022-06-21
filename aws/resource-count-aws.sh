@@ -68,6 +68,39 @@ else
    WITH_DATA="false"
 fi
 
+
+##########################################################################################
+## Optionally pass an AWS profile to use. Profiles are available at ~/.aws/config (Linux & Mac) or %USERPROFILE%\.aws\config (Windows)
+##########################################################################################
+
+echo ">>> Profiles are available at ~/.aws/config (Linux & Mac) or %USERPROFILE%\.aws\config (Windows)"
+
+ORIGINAL_AWS_PROFILE_ENV=$(printenv AWS_PROFILE)
+echo "Setting AWS_PROFILE environment variable for this run"
+echo ""
+
+echo "Available profiles:"
+INSTALLED_PROFILES=$(aws configure list-profiles)
+echo "$INSTALLED_PROFILES"
+echo ""
+
+
+INSTALLED_PROFILES_COUNT=$(aws configure list-profiles | wc -l)
+
+if [ ${INSTALLED_PROFILES_COUNT} -eq 1 ]; then
+  echo ""
+  echo ">>> Only one profile available. Running with it."
+  export AWS_PROFILE=${INSTALLED_PROFILES}
+else
+  echo ">>> Please enter the desired AWS configuration profile to use."
+  read AWS_PROFILE_INPUT
+  while [[ $AWS_PROFILE_INPUT = "" ]]; do
+    echo "AWS Configuration profile cannot be empty"
+    read AWS_PROFILE_INPUT
+  done
+  export AWS_PROFILE=${AWS_PROFILE_INPUT}
+fi
+
 ##########################################################################################
 ## Utility functions.
 ##########################################################################################
