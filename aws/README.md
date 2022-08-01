@@ -24,7 +24,7 @@ The below AWS APIs need to be enabled in order to gather information from AWS.
 * aws elb describe-load-balancer
 * aws lambda get-account-settings (optional, when running as `resource-count-aws.sh cwp`)
 * aws ecs list-tasks (optional, when running as `resource-count-aws.sh cwp`)
-* aws ecs list-cluster (optional, when running as `resource-count-aws.sh cwp`)
+* aws ecs list-clusters (optional, when running as `resource-count-aws.sh cwp`)
 * aws s3api list-buckets (optional, when running as `resource-count-aws.sh data`)
 * aws s3api list-objects (optional, when running as `resource-count-aws.sh data`)
 
