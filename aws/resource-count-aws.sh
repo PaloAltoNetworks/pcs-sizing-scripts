@@ -187,8 +187,6 @@ aws_s3_ls_bucket_size() {
   fi
 }
 
-## -----------------------------------------------------------------------------------------------------############# erick modifications
-
 aws_ecs_list_ecs_fargate_containers_running() {
   ECS_FARGATE_CLUSTER_LIST_REGION=($(aws ecs list-clusters --max-items 99999 --region="${1}" --output json | jq -r '.clusterArns[]'  2>/dev/null ))
   ECS_FARGATE_CLUSTER_COUNT=$(aws ecs list-clusters --max-items 99999 --region="${1}" --output json | jq -r '[.clusterArns[]] | length' 2>/dev/null )
@@ -202,9 +200,6 @@ aws_ecs_list_ecs_fargate_containers_running() {
    fi
    echo " ${ECS_FARGATE_TASK_COUNT_TOTAL_REGION}"
 }
-
-## -----------------------------------------------------------------------------------------------------############# erick modifications
-
         
 
 ####
