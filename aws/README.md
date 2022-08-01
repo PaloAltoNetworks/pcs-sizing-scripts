@@ -23,6 +23,8 @@ The below AWS APIs need to be enabled in order to gather information from AWS.
 * aws redshift describe-clusters
 * aws elb describe-load-balancer
 * aws lambda get-account-settings (optional, when running as `resource-count-aws.sh cwp`)
+* aws ecs list-tasks (optional, when running as `resource-count-aws.sh cwp`)
+* aws ecs list-cluster (optional, when running as `resource-count-aws.sh cwp`)
 * aws s3api list-buckets (optional, when running as `resource-count-aws.sh data`)
 * aws s3api list-objects (optional, when running as `resource-count-aws.sh data`)
 
@@ -54,7 +56,7 @@ The script can collect sizing information for Prisma Cloud Compute (CWP, aka Clo
 * Example ```./resource-count-aws.sh cwp```
 
 
-Currently, this is limited to counting AWS Lambda Functions.
+Currently, this is limited to counting AWS Lambda Functions and ECS Fargate Tasks (Assuming each task runs only 1 container).
 
 ## Data Security Support
 
