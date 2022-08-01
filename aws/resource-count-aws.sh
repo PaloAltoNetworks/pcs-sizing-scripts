@@ -186,6 +186,25 @@ aws_s3_ls_bucket_size() {
     echo '-1'
   fi
 }
+
+## -----------------------------------------------------------------------------------------------------############# erick modifications
+
+aws_ecs_list_ecs_fargate_containers_running() {
+  ECS_FARGATE_CLUSTER_LIST_REGION=($(aws ecs list-clusters --max-items 99999 --region="${1}" --output json | jq -r '.clusterArns[]'  2>/dev/null ))
+  ECS_FARGATE_CLUSTER_COUNT=$(aws ecs list-clusters --max-items 99999 --region="${1}" --output json | jq -r '[.clusterArns[]] | length' 2>/dev/null )
+
+   if [ ${ECS_FARGATE_CLUSTER_COUNT} -ne 0 ]; then
+     for cluster in "${ECS_FARGATE_CLUSTER_LIST_REGION[@]}"
+     do
+        ECS_FARGATE_TASK_COUNT=($(aws ecs list-tasks --max-items 99999 --region "${1}" --cluster "${cluster}" --desired-status running --output json  | jq -r '[.taskArns[]] | length' 2>/dev/null))
+        ECS_FARGATE_TASK_COUNT_TOTAL_REGION=$((ECS_FARGATE_TASK_COUNT_TOTAL_REGION + ECS_FARGATE_TASK_COUNT))
+     done
+   fi
+   echo " ${ECS_FARGATE_TASK_COUNT_TOTAL_REGION}"
+}
+
+## -----------------------------------------------------------------------------------------------------############# erick modifications
+
         
 
 ####
@@ -296,6 +315,12 @@ unassume_role() {
 ##########################################################################################
 
 reset_account_counters() {
+  ECS_FARGATE_INFORMATION_TASK_COUNT=0
+  ECS_FARGATE_CLUSTER_LIST_REGION=0
+  ECS_FARGATE_CLUSTER_COUNT=0
+  ECS_FARGATE_TASK_COUNT=0
+  ECS_FARGATE_TASK_COUNT_TOTAL_REGION=0
+  ECS_FARGATE_CREDIT_USAGE=0
   EC2_INSTANCE_COUNT=0
   RDS_INSTANCE_COUNT=0
   NATGW_COUNT=0
@@ -310,6 +335,7 @@ reset_account_counters() {
 
 reset_global_counters() {
   EC2_INSTANCE_COUNT_GLOBAL=0
+  ECS_FARGATE_TASK_COUNT_GLOBAL=0
   RDS_INSTANCE_COUNT_GLOBAL=0
   REDSHIFT_COUNT_GLOBAL=0
   NATGW_COUNT_GLOBAL=0
@@ -411,6 +437,22 @@ count_account_resources() {
       echo "Total Lambda Functions across all regions: ${LAMBDA_COUNT}"
       echo "###################################################################################"
       echo ""
+      
+      
+      
+      echo "###################################################################################"
+      echo "Running ECS FARGATE TASKS"
+     
+      for i in "${REGION_LIST[@]}"
+      do
+        ECS_FARGATE_INFORMATION_TASK_COUNT=$(aws_ecs_list_ecs_fargate_containers_running "${i}")
+        echo "  Count of Running ECS Tasks in Region ${i}: ${ECS_FARGATE_INFORMATION_TASK_COUNT}"
+        ECS_FARGATE_TASK_COUNT_GLOBAL=$((ECS_FARGATE_TASK_COUNT_GLOBAL + ECS_FARGATE_INFORMATION_TASK_COUNT))
+      done
+      
+      echo "Total ECS FARGATE TASK Count Instances across all regions: ${ECS_FARGATE_TASK_COUNT_GLOBAL}"
+      echo "###################################################################################"
+      echo ""
     fi
 
     if [ "${WITH_DATA}" = "true" ]; then
@@ -437,12 +479,15 @@ count_account_resources() {
       if [ "${WITH_CWP}" = "true" ]; then
         LAMBDA_CREDIT_USAGE=$((LAMBDA_COUNT/6))
         echo "CWP: Total Credit Consumption by ${LAMBDA_COUNT} Lambda Functions: ${LAMBDA_CREDIT_USAGE}"
+        
+        ECS_FARGATE_CREDIT_USAGE=$((ECS_FARGATE_INFORMATION_TASK_COUNT*1))
+        echo "CWP: Total Credit Consumption by ${ECS_FARGATE_INFORMATION_TASK_COUNT} ECS Fargate Tasks: ${ECS_FARGATE_CREDIT_USAGE}"
       fi
 
       echo "###################################################################################"
       echo ""
     fi
-
+    
 
     EC2_INSTANCE_COUNT_GLOBAL=$((EC2_INSTANCE_COUNT_GLOBAL + EC2_INSTANCE_COUNT))
     RDS_INSTANCE_COUNT_GLOBAL=$((RDS_INSTANCE_COUNT_GLOBAL + RDS_INSTANCE_COUNT))
@@ -478,11 +523,13 @@ count_account_resources() {
 
   if [ "${WITH_CWP}" = "true" ]; then
     LAMBDA_CREDIT_USAGE_GLOBAL=$((LAMBDA_COUNT_GLOBAL/6))
-    COMPUTE_CREDIT_USAGE_GLOBAL=$((LAMBDA_CREDIT_USAGE_GLOBAL))
+    ECS_FARGATE_TASK_USAGE_GLOBAL=$((ECS_FARGATE_TASK_COUNT_GLOBAL*1))
+    COMPUTE_CREDIT_USAGE_GLOBAL=$((LAMBDA_CREDIT_USAGE_GLOBAL+ECS_FARGATE_TASK_USAGE_GLOBAL))
     echo ""
     echo "###################################################################################"
     echo "CWP Total Credit Consumption:"
     echo "  By ${LAMBDA_COUNT_GLOBAL} Lambda Functions: ${LAMBDA_CREDIT_USAGE_GLOBAL}"
+    echo "  By ${ECS_FARGATE_TASK_COUNT_GLOBAL} ECS Fargate Tasks: ${ECS_FARGATE_TASK_USAGE_GLOBAL}"
     echo ""
     echo "CWP Total Credit Consumption: ${COMPUTE_CREDIT_USAGE_GLOBAL}"
     echo ""
