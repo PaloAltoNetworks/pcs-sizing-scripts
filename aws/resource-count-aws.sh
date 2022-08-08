@@ -205,6 +205,38 @@ aws_s3_ls_bucket_size() {
   fi
 }
         
+####
+
+get_ecs_fargate_task_count() {
+  REGION=$1
+  ECS_FARGATE_CLUSTERS=$(aws_ecs_list_clusters "${REGION}")
+
+  XIFS=$IFS
+  # shellcheck disable=SC2206
+  IFS=$'\n' ECS_FARGATE_CLUSTERS_LIST=($ECS_FARGATE_CLUSTERS)
+  IFS=$XIFS
+
+  ECS_FARGATE_TASK_LIST_COUNT=0
+  RESULT=0
+
+  for CLUSTER in "${ECS_FARGATE_CLUSTERS_LIST[@]}"
+  do
+    ECS_FARGATE_TASK_LIST_COUNT=($(aws_ecs_list_tasks "${REGION}" --cluster "${CLUSTER}" --desired-status running --output json | jq -r '[.taskArns[]] | length' 2>/dev/null))
+    RESULT=$((RESULT + ECS_FARGATE_TASK_LIST_COUNT))
+  done
+  echo "${RESULT}"
+}
+
+get_s3_bucket_list() {
+  S3_BUCKETS=$(aws_s3api_list_buckets | jq -r '.[]' 2>/dev/null)
+
+  XIFS=$IFS
+  # shellcheck disable=SC2206
+  IFS=$'\n' S3_BUCKETS_LIST=($S3_BUCKETS)
+  IFS=$XIFS
+
+  echo "${S3_BUCKETS_LIST}"
+}
 
 ####
 
@@ -250,26 +282,6 @@ get_account_list() {
     ACCOUNT_LIST=""
     TOTAL_ACCOUNTS=1
   fi
-}
-
-get_bucket_list() {
-  echo "###################################################################################"
-  echo "Querying S3 buckets"
-
-  BUCKETS=$(aws_s3api_list_buckets | jq -r '.[]' 2>/dev/null)
-
-  XIFS=$IFS
-  # shellcheck disable=SC2206
-  IFS=$'\n' BUCKET_LIST=($BUCKETS)
-  IFS=$XIFS
-
-  if [ ${#BUCKET_LIST[@]} -eq 0 ]; then
-    echo "  Warning: Could not query S3 buckets"
-  fi
-
-  echo "  Total number of buckets: ${#BUCKET_LIST[@]}"
-  echo "###################################################################################"
-  echo ""
 }
 
 assume_role() {
@@ -320,8 +332,8 @@ reset_account_counters() {
   REDSHIFT_COUNT=0
   ELB_COUNT=0
   LAMBDA_COUNT=0
+  ECS_FARGATE_TASK_COUNT=0
   # shellcheck disable=SC2178
-  BUCKET_LIST=[]
   BUCKETS_SIZE=0
   WORKLOAD_COUNT=0
 }
@@ -333,6 +345,7 @@ reset_global_counters() {
   NATGW_COUNT_GLOBAL=0
   ELB_COUNT_GLOBAL=0
   LAMBDA_COUNT_GLOBAL=0
+  ECS_FARGATE_TASK_COUNT_GLOBAL=0
   BUCKETS_SIZE_GLOBAL=0
   WORKLOAD_COUNT_GLOBAL=0
   WORKLOAD_COUNT_GLOBAL_WITH_IAM_MODULE=0
@@ -418,6 +431,7 @@ count_account_resources() {
     echo ""
 
     if [ "${WITH_CWP}" = "true" ]; then
+
       echo "###################################################################################"
       echo "Lambda Functions"
       for i in "${REGION_LIST[@]}"
@@ -429,38 +443,35 @@ count_account_resources() {
       echo "Total Lambda Functions across all regions: ${LAMBDA_COUNT}"
       echo "###################################################################################"
       echo ""
+
+      echo "###################################################################################"
+      echo "ECS Fargate Tasks"
+      for i in "${REGION_LIST[@]}"
+      do
+        RESOURCE_COUNT=$(get_ecs_fargate_task_count "${i}")
+        echo "  Count of Running ECS Tasks in Region ${i}: ${RESOURCE_COUNT}"
+        ECS_FARGATE_TASK_COUNT=$((ECS_FARGATE_TASK_COUNT + RESOURCE_COUNT))
+      done
+      echo "Total ECS Fargate Task Count (Instances) across all regions: ${ECS_FARGATE_TASK_COUNT}"
+      echo "###################################################################################"
+      echo ""
+
     fi
 
     if [ "${WITH_DATA}" = "true" ]; then
       echo "###################################################################################"
-      echo "S3 Bucket sizes"
-      get_bucket_list
+      echo "S3 Bucket Sizes"
+      BUCKET_LIST=$(get_s3_bucket_list)
       for i in "${BUCKET_LIST[@]}"
         do
         BUCKET_SIZE=$(aws_s3_ls_bucket_size "${i}" 2>/dev/null) 
-        echo "Total size of bucket ${i}: ${BUCKET_SIZE}"
+        echo "Total Size of S3 Bucket ${i}: ${BUCKET_SIZE}"
         BUCKETS_SIZE=$((BUCKETS_SIZE + BUCKET_SIZE))
       done
-      echo "Total S3 Buckets size: ${BUCKETS_SIZE}"
+      echo "Total S3 Buckets Size: ${BUCKETS_SIZE}"
       echo "###################################################################################"
       echo ""
     fi
-
-    if [ "${USE_AWS_ORG}" = "true" ]; then
-      WORKLOAD_COUNT=$((EC2_INSTANCE_COUNT + RDS_INSTANCE_COUNT + REDSHIFT_COUNT + NATGW_COUNT + ELB_COUNT))
-      echo "###################################################################################"
-      echo "Totals for Member Account: ${ACCOUNT_NAME} ($ACCOUNT_ID)"
-      echo "CSPM: Total Billable Resources: ${WORKLOAD_COUNT}"
-
-      if [ "${WITH_CWP}" = "true" ]; then
-        LAMBDA_CREDIT_USAGE=$((LAMBDA_COUNT/6))
-        echo "CWP: Total Credit Consumption by ${LAMBDA_COUNT} Lambda Functions: ${LAMBDA_CREDIT_USAGE}"
-      fi
-
-      echo "###################################################################################"
-      echo ""
-    fi
-
 
     EC2_INSTANCE_COUNT_GLOBAL=$((EC2_INSTANCE_COUNT_GLOBAL + EC2_INSTANCE_COUNT))
     RDS_INSTANCE_COUNT_GLOBAL=$((RDS_INSTANCE_COUNT_GLOBAL + RDS_INSTANCE_COUNT))
@@ -468,8 +479,8 @@ count_account_resources() {
     REDSHIFT_COUNT_GLOBAL=$((REDSHIFT_COUNT_GLOBAL + REDSHIFT_COUNT))
     ELB_COUNT_GLOBAL=$((ELB_COUNT_GLOBAL + ELB_COUNT))
     LAMBDA_COUNT_GLOBAL=$((LAMBDA_COUNT_GLOBAL + LAMBDA_COUNT))
+    ECS_FARGATE_TASK_COUNT_GLOBAL=$((ECS_FARGATE_TASK_COUNT_GLOBAL + ECS_FARGATE_TASK_COUNT))
     BUCKETS_SIZE_GLOBAL=$((BUCKETS_SIZE_GLOBAL + BUCKETS_SIZE))
-
 
     reset_account_counters
 
@@ -496,27 +507,26 @@ count_account_resources() {
 
   if [ "${WITH_CWP}" = "true" ]; then
     LAMBDA_CREDIT_USAGE_GLOBAL=$((LAMBDA_COUNT_GLOBAL/6))
-    COMPUTE_CREDIT_USAGE_GLOBAL=$((LAMBDA_CREDIT_USAGE_GLOBAL))
+    COMPUTE_CREDIT_USAGE_GLOBAL=$((LAMBDA_CREDIT_USAGE_GLOBAL + ECS_FARGATE_TASK_COUNT_GLOBAL))
     echo ""
     echo "###################################################################################"
     echo "CWP Total Credit Consumption:"
-    echo "  By ${LAMBDA_COUNT_GLOBAL} Lambda Functions: ${LAMBDA_CREDIT_USAGE_GLOBAL}"
+    echo "  Count of Lambda Functions: ${LAMBDA_COUNT_GLOBAL} Credit Consumption: ${LAMBDA_CREDIT_USAGE_GLOBAL}"
+    echo "  Count and Credit Consumption of ECS Fargate Tasks: ${ECS_FARGATE_TASK_COUNT_GLOBAL}"
     echo ""
     echo "CWP Total Credit Consumption: ${COMPUTE_CREDIT_USAGE_GLOBAL}"
-    echo ""
     echo "###################################################################################"
   fi
 
   if [ "${WITH_DATA}" = "true" ]; then
-    BUCKETS_USAGE_GIG_GLOBAL=$((BUCKETS_SIZE_GLOBAL/1000/1000/1000))
-    BUCKETS_CREDIT_FULL_USAGE_GLOBAL=$((BUCKETS_USAGE_GIG_GLOBAL/33))
-    BUCKETS_CREDIT_EXPOSURE_USAGE_GLOBAL=$((BUCKETS_USAGE_GIG_GLOBAL/200))
+    BUCKETS_SIZE_GIG_GLOBAL=$((BUCKETS_SIZE_GLOBAL/1000/1000/1000))
+    BUCKETS_CREDIT_EXPOSURE_USAGE_GLOBAL=$((BUCKETS_SIZE_GIG_GLOBAL/200))
+    BUCKETS_CREDIT_FULL_USAGE_GLOBAL=$((BUCKETS_SIZE_GIG_GLOBAL/33))
     echo ""
     echo "###################################################################################"
     echo "Data Security Total Credit Consumption:"
-    echo "  If choosing Full Scan: ${BUCKETS_CREDIT_FULL_USAGE_GLOBAL}"
     echo "  If choosing Exposure Scan: ${BUCKETS_CREDIT_EXPOSURE_USAGE_GLOBAL}"
-    echo ""
+    echo "  If choosing Full Scan: ${BUCKETS_CREDIT_FULL_USAGE_GLOBAL}"
     echo "###################################################################################"
   fi
 

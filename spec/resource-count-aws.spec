@@ -187,6 +187,29 @@ EOJ
 EOJ
   }
 
+  aws_ecs_list_clusters() {
+    cat << EOJ
+{
+    "clusterArns": [
+        "arn:aws:ecs:us-west-2:123456789012:cluster/Cluster1",
+        "arn:aws:ecs:us-west-2:123456789012:cluster/Cluster2"
+    ]
+}
+EOJ
+  }
+
+  aws_ecs_list_tasks() {
+    cat << EOJ
+{
+    "taskArns": [
+        "arn:aws:ecs:us-west-2:123456789012:task/a1b2c3d4-5678-90ab-cdef-11111EXAMPLE",
+        "arn:aws:ecs:us-west-2:123456789012:task/a1b2c3d4-5678-90ab-cdef-22222EXAMPLE",
+        "arn:aws:ecs:us-west-2:123456789012:task/a1b2c3d4-5678-90ab-cdef-33333EXAMPLE"
+    ]
+}
+EOJ
+  }
+
   aws_lambda_get_account_settings() {
     cat << EOJ
 {
@@ -256,6 +279,16 @@ EOJ
 
   It 'returns a list of EC2 Instances'
     When call aws_ec2_describe_instances
+    The output should not include "Error"
+  End
+
+  It 'returns a list of ECS Clusters'
+    When call aws_ecs_list_clusters
+    The output should not include "Error"
+  End
+
+  It 'returns a list of ECS Tasks'
+    When call aws_ecs_list_tasks
     The output should not include "Error"
   End
 
@@ -351,9 +384,9 @@ EOJ
     #
     When call count_account_resources
     The output should include "Count"
-    The variable BUCKETS_USAGE_GIG_GLOBAL should eq 1270
-    The variable BUCKETS_CREDIT_FULL_USAGE_GLOBAL should eq 38
-    The variable BUCKETS_CREDIT_EXPOSURE_USAGE_GLOBAL should eq 6
+    The variable BUCKETS_SIZE_GIG_GLOBAL should eq 423
+    The variable BUCKETS_CREDIT_EXPOSURE_USAGE_GLOBAL should eq 2
+    The variable BUCKETS_CREDIT_FULL_USAGE_GLOBAL should eq 12
   End
 
 End
