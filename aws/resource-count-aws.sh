@@ -134,7 +134,7 @@ aws_ecs_list_clusters() {
 }
 
 aws_ecs_list_tasks() {
-  RESULT=$(aws ecs list-tasks --max-items 99999 --region "${1}" --cluster "${$2}" --desired-status running --output json 2>/dev/null)
+  RESULT=$(aws ecs list-tasks --max-items 99999 --region "${1}" --cluster "${2}" --desired-status running --output json 2>/dev/null)
   if [ $? -eq 0 ]; then
     echo "${RESULT}"
   else
@@ -235,7 +235,8 @@ get_s3_bucket_list() {
   IFS=$'\n' S3_BUCKETS_LIST=($S3_BUCKETS)
   IFS=$XIFS
 
-  echo "${S3_BUCKETS_LIST}"
+  # Returning arrays is really not practical.
+  echo "${S3_BUCKETS_LIST[@]}"
 }
 
 ####
@@ -335,7 +336,6 @@ reset_account_counters() {
   ECS_FARGATE_TASK_COUNT=0
   # shellcheck disable=SC2178
   BUCKETS_SIZE=0
-  WORKLOAD_COUNT=0
 }
 
 reset_global_counters() {
@@ -461,7 +461,8 @@ count_account_resources() {
     if [ "${WITH_DATA}" = "true" ]; then
       echo "###################################################################################"
       echo "S3 Bucket Sizes"
-      BUCKET_LIST=$(get_s3_bucket_list)
+      BUCKET_LIST=[]
+      get_s3_bucket_list
       for i in "${BUCKET_LIST[@]}"
         do
         BUCKET_SIZE=$(aws_s3_ls_bucket_size "${i}" 2>/dev/null) 
