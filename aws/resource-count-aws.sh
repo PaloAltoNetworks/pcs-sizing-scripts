@@ -124,6 +124,24 @@ aws_ec2_describe_instances() {
   fi
 }
 
+aws_ecs_list_clusters() {
+  RESULT=$(aws ecs list-clusters --max-items 99999 --region="${1}" --output json 2>/dev/null)
+  if [ $? -eq 0 ]; then
+    echo "${RESULT}"
+  else
+    echo '{"Error": [] }'
+  fi
+}
+
+aws_ecs_list_tasks() {
+  RESULT=$(aws ecs list-tasks --max-items 99999 --region "${1}" --cluster "${$2}" --desired-status running --output json 2>/dev/null)
+  if [ $? -eq 0 ]; then
+    echo "${RESULT}"
+  else
+    echo '{"Error": [] }'
+  fi
+}
+
 aws_ec2_describe_db_instances() {
   RESULT=$(aws rds describe-db-instances --max-items 99999 --region="${1}" --output json 2>/dev/null)
   if [ $? -eq 0 ]; then
@@ -211,26 +229,6 @@ get_region_list() {
   echo ""
 }
 
-get_bucket_list() {
-  echo "###################################################################################"
-  echo "Querying S3 buckets"
-
-  BUCKETS=$(aws_s3api_list_buckets | jq -r '.[]' 2>/dev/null)
-
-  XIFS=$IFS
-  # shellcheck disable=SC2206
-  IFS=$'\n' BUCKET_LIST=($BUCKETS)
-  IFS=$XIFS
-
-  if [ ${#BUCKET_LIST[@]} -eq 0 ]; then
-    echo "  Warning: Could not query S3 buckets"
-  fi
-
-  echo "  Total number of buckets: ${#BUCKET_LIST[@]}"
-  echo "###################################################################################"
-  echo ""
-}
-
 get_account_list() {
   if [ "${USE_AWS_ORG}" = "true" ]; then
     echo "###################################################################################"
@@ -252,6 +250,26 @@ get_account_list() {
     ACCOUNT_LIST=""
     TOTAL_ACCOUNTS=1
   fi
+}
+
+get_bucket_list() {
+  echo "###################################################################################"
+  echo "Querying S3 buckets"
+
+  BUCKETS=$(aws_s3api_list_buckets | jq -r '.[]' 2>/dev/null)
+
+  XIFS=$IFS
+  # shellcheck disable=SC2206
+  IFS=$'\n' BUCKET_LIST=($BUCKETS)
+  IFS=$XIFS
+
+  if [ ${#BUCKET_LIST[@]} -eq 0 ]; then
+    echo "  Warning: Could not query S3 buckets"
+  fi
+
+  echo "  Total number of buckets: ${#BUCKET_LIST[@]}"
+  echo "###################################################################################"
+  echo ""
 }
 
 assume_role() {
