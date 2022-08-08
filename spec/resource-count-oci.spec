@@ -1,4 +1,4 @@
-# To use this test, call: shellspec spec/resource-count-oci_spec.sh
+# To use this test, call: shellspec spec/resource-count-oci.spec
 
 Describe 'resource-count-oci'
 

@@ -1,4 +1,4 @@
-# To use this test, call: shellspec spec/resource-count-abc_spec.sh
+# To use this test, call: shellspec spec/resource-count-abc.spec
 
 Describe 'resource-count-abc'
 
