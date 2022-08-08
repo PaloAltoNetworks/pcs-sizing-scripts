@@ -21,7 +21,7 @@ Describe 'resource-count-oci'
       "id": "ocid1.compartment.123456789012"
     },
     {
-      "compartment-id": "ocid1.tenancy.234567891234",
+      "compartment-id": "ocid1.tenancy.123456789012",
       "id": "ocid1.compartment.234567891234"
     }
   ]
@@ -30,7 +30,8 @@ EOJ
   }
 
   oci_compute_instances_list() {
-    cat << EOJ
+    if [ "$1" == "ocid1.compartment.123456789012" ]; then
+      cat << EOJ
 {
   "data": [
     {
@@ -44,6 +45,18 @@ EOJ
   ]
 }
 EOJ
+    else
+      cat << EOJ2
+{
+  "data": [
+    {
+      "id": "ocid1.instance.234567891234",
+      "lifecycle-state": "RUNNING"
+    }
+  ]
+}
+EOJ2
+    fi  
   }
 
   oci_db_system_list() {
@@ -101,7 +114,7 @@ EOJ
     When call count_resources
     The output should include "Count"
     The variable TOTAL_COMPARTMENTS should eq 2
-    The variable WORKLOAD_COUNT_GLOBAL should eq 12
+    The variable WORKLOAD_COUNT_GLOBAL should eq 11
   End
 
 End
