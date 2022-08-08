@@ -75,7 +75,7 @@ oci_load_balancer_list(){
 ####
 
 get_compartments() {
-  COMPARTMENTS=($(oci_compartments_list | jq -r '.data[]."compartment-id"' 2>/dev/null))
+  COMPARTMENTS=($(oci_compartments_list | jq -r '.data[]."id"' 2>/dev/null))
   TOTAL_COMPARTMENTS=${#COMPARTMENTS[@]}
 }
 
