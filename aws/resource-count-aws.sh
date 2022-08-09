@@ -109,7 +109,7 @@ aws_organizations_list_accounts() {
 }
 
 aws_sts_assume_role() {
-  RESULT=$(aws sts assume-role --role-arn="${1}" --role-session-name=prisma-cloud-sizing-resources --duration-seconds=999 --output json 2>/dev/null)
+  RESULT=$(aws sts assume-role --role-arn="${1}" --role-session-name=pcs-sizing-script --duration-seconds=999 --output json 2>/dev/null)
   if [ $? -eq 0 ]; then
     echo "${RESULT}"
   fi
@@ -206,7 +206,7 @@ aws_s3_ls_bucket_size() {
     echo '-1'
   fi
 }
-        
+
 ####
 
 get_ecs_fargate_task_count() {
@@ -272,6 +272,11 @@ get_account_list() {
     if [ $? -ne 0 ] || [ -z "${MASTER_ACCOUNT_ID}" ]; then
       error_and_exit "Error: Failed to describe AWS Organization, check aws cli setup, and access to the AWS Organizations API."
     fi
+    # Save current environment variables of the master account.
+    MASTER_AWS_ACCESS_KEY_ID=$AWS_ACCESS_KEY_ID
+    MASTER_AWS_SECRET_ACCESS_KEY=$AWS_SECRET_ACCESS_KEY
+    MASTER_AWS_SESSION_TOKEN=$AWS_SESSION_TOKEN
+    #
     ACCOUNT_LIST=$(aws_organizations_list_accounts)
     if [ $? -ne 0 ] || [ -z "${ACCOUNT_LIST}" ]; then
       error_and_exit "Error: Failed to list AWS Organization accounts, check aws cli setup, and access to the AWS Organizations API."
@@ -292,7 +297,7 @@ assume_role() {
   ACCOUNT_ID="${2}"
   echo "###################################################################################"
   echo "Processing Account: ${ACCOUNT_NAME} (${ACCOUNT_ID})"
-  if [ "${ACCOUNT_ID}" = "${MASTER_ACCOUNT_ID}" ]; then 
+  if [ "${ACCOUNT_ID}" = "${MASTER_ACCOUNT_ID}" ]; then
     echo "  Account is the master account, skipping assume role ..."
   else
     ACCOUNT_ASSUME_ROLE_ARN="arn:aws:iam::${ACCOUNT_ID}:role/OrganizationAccountAccessRole"
@@ -319,11 +324,11 @@ assume_role() {
 ##########################################################################################
 
 unassume_role() {
-  unset AWS_ACCESS_KEY_ID
-  unset AWS_SECRET_ACCESS_KEY
-  unset AWS_SESSION_TOKEN
+  AWS_ACCESS_KEY_ID=$MASTER_AWS_ACCESS_KEY_ID
+  AWS_SECRET_ACCESS_KEY=$MASTER_AWS_SECRET_ACCESS_KEY
+  AWS_SESSION_TOKEN=$MASTER_AWS_SESSION_TOKEN
 }
-      
+
 ##########################################################################################
 ## Set or reset counters.
 ##########################################################################################
@@ -467,7 +472,7 @@ count_account_resources() {
       get_s3_bucket_list
       for i in "${BUCKET_LIST[@]}"
         do
-        BUCKET_SIZE=$(aws_s3_ls_bucket_size "${i}" 2>/dev/null) 
+        BUCKET_SIZE=$(aws_s3_ls_bucket_size "${i}" 2>/dev/null)
         echo "Total Size of S3 Bucket ${i}: ${BUCKET_SIZE}"
         BUCKETS_SIZE=$((BUCKETS_SIZE + BUCKET_SIZE))
       done
