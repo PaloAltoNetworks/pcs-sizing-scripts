@@ -24,6 +24,8 @@
 # - aws redshift describe-clusters
 # - aws elb describe-load-balancer
 # - aws lambda get-account-settings (optional)
+# - aws ecs list-clusters (optional)
+# - aws ecs list-tasks (optional)
 # - aws s3api list-buckets (optional)
 # - aws s3api list-objects (optional)
 ##########################################################################################
@@ -502,8 +504,6 @@ count_account_resources() {
   echo ""
   echo "CSPM: Total Credit Consumption: ${WORKLOAD_COUNT_GLOBAL}"
   echo "(If using the IAM Security Module: ${WORKLOAD_COUNT_GLOBAL_WITH_IAM_MODULE})"
-  echo ""
-  echo "Totals are based upon resource counts at the time that this script is executed."
   echo "###################################################################################"
 
   if [ "${WITH_CWP}" = "true" ]; then
@@ -513,7 +513,7 @@ count_account_resources() {
     echo "###################################################################################"
     echo "CWP Total Credit Consumption:"
     echo "  Count of Lambda Functions: ${LAMBDA_COUNT_GLOBAL} Credit Consumption: ${LAMBDA_CREDIT_USAGE_GLOBAL}"
-    echo "  Count and Credit Consumption of ECS Fargate Tasks: ${ECS_FARGATE_TASK_COUNT_GLOBAL}"
+    echo "  Count of ECS Fargate Tasks: ${ECS_FARGATE_TASK_COUNT_GLOBAL}"
     echo ""
     echo "CWP Total Credit Consumption: ${COMPUTE_CREDIT_USAGE_GLOBAL}"
     echo "###################################################################################"
@@ -526,11 +526,13 @@ count_account_resources() {
     echo ""
     echo "###################################################################################"
     echo "Data Security Total Credit Consumption:"
-    echo "  If choosing Exposure Scan: ${BUCKETS_CREDIT_EXPOSURE_USAGE_GLOBAL}"
-    echo "  If choosing Full Scan: ${BUCKETS_CREDIT_FULL_USAGE_GLOBAL}"
+    echo "  For Exposure Scan: ${BUCKETS_CREDIT_EXPOSURE_USAGE_GLOBAL}"
+    echo "  For Full Scan: ${BUCKETS_CREDIT_FULL_USAGE_GLOBAL}"
     echo "###################################################################################"
   fi
 
+  echo "Totals are based upon resource counts at the time that this script is executed."
+  echo ""
   echo "If you have any questions/concerns, please see the following licensing guide:"
   echo "https://www.paloaltonetworks.com/resources/guides/prisma-cloud-enterprise-edition-licensing-guide"
 }
