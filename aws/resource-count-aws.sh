@@ -338,7 +338,6 @@ reset_account_counters() {
   ELB_COUNT=0
   LAMBDA_COUNT=0
   ECS_FARGATE_TASK_COUNT=0
-  S3_BUCKETS_LIST=[]
   S3_BUCKETS_SIZE=0
 }
 
