@@ -236,9 +236,6 @@ get_s3_bucket_list() {
   # shellcheck disable=SC2206
   IFS=$'\n' S3_BUCKETS_LIST=($S3_BUCKETS)
   IFS=$XIFS
-
-  # Returning arrays is really not practical.
-  echo "${S3_BUCKETS_LIST[@]}"
 }
 
 ####
@@ -341,8 +338,8 @@ reset_account_counters() {
   ELB_COUNT=0
   LAMBDA_COUNT=0
   ECS_FARGATE_TASK_COUNT=0
-  # shellcheck disable=SC2178
-  BUCKETS_SIZE=0
+  S3_BUCKETS_LIST=[]
+  S3_BUCKETS_SIZE=0
 }
 
 reset_global_counters() {
@@ -353,7 +350,9 @@ reset_global_counters() {
   ELB_COUNT_GLOBAL=0
   LAMBDA_COUNT_GLOBAL=0
   ECS_FARGATE_TASK_COUNT_GLOBAL=0
-  BUCKETS_SIZE_GLOBAL=0
+  S3_BUCKETS_SIZE_GLOBAL=0
+  S3_BUCKETS_CREDIT_EXPOSURE_USAGE_GLOBAL=0
+  S3_BUCKETS_CREDIT_FULL_USAGE_GLOBAL=0
   WORKLOAD_COUNT_GLOBAL=0
   WORKLOAD_COUNT_GLOBAL_WITH_IAM_MODULE=0
   LAMBDA_CREDIT_USAGE_GLOBAL=0
@@ -468,15 +467,14 @@ count_account_resources() {
     if [ "${WITH_DATA}" = "true" ]; then
       echo "###################################################################################"
       echo "S3 Bucket Sizes"
-      BUCKET_LIST=[]
       get_s3_bucket_list
-      for i in "${BUCKET_LIST[@]}"
+      for i in "${S3_BUCKETS_LIST[@]}"
         do
-        BUCKET_SIZE=$(aws_s3_ls_bucket_size "${i}" 2>/dev/null)
-        echo "Total Size of S3 Bucket ${i}: ${BUCKET_SIZE}"
-        BUCKETS_SIZE=$((BUCKETS_SIZE + BUCKET_SIZE))
+        S3_BUCKET_SIZE=$(aws_s3_ls_bucket_size "${i}" 2>/dev/null)
+        echo "  Size of S3 Bucket ${i}: ${S3_BUCKET_SIZE} bytes"
+        S3_BUCKETS_SIZE=$((S3_BUCKETS_SIZE + S3_BUCKET_SIZE))
       done
-      echo "Total S3 Buckets Size: ${BUCKETS_SIZE}"
+      echo "Total S3 Buckets Size: ${S3_BUCKETS_SIZE} bytes"
       echo "###################################################################################"
       echo ""
     fi
@@ -488,7 +486,7 @@ count_account_resources() {
     ELB_COUNT_GLOBAL=$((ELB_COUNT_GLOBAL + ELB_COUNT))
     LAMBDA_COUNT_GLOBAL=$((LAMBDA_COUNT_GLOBAL + LAMBDA_COUNT))
     ECS_FARGATE_TASK_COUNT_GLOBAL=$((ECS_FARGATE_TASK_COUNT_GLOBAL + ECS_FARGATE_TASK_COUNT))
-    BUCKETS_SIZE_GLOBAL=$((BUCKETS_SIZE_GLOBAL + BUCKETS_SIZE))
+    S3_BUCKETS_SIZE_GLOBAL=$((S3_BUCKETS_SIZE_GLOBAL + S3_BUCKETS_SIZE))
 
     reset_account_counters
 
@@ -525,19 +523,22 @@ count_account_resources() {
   fi
 
   if [ "${WITH_DATA}" = "true" ]; then
-    BUCKETS_SIZE_GIG_GLOBAL=$((BUCKETS_SIZE_GLOBAL/1000/1000/1000))
-    BUCKETS_CREDIT_EXPOSURE_USAGE_GLOBAL=$((BUCKETS_SIZE_GIG_GLOBAL/200))
-    BUCKETS_CREDIT_FULL_USAGE_GLOBAL=$((BUCKETS_SIZE_GIG_GLOBAL/33))
+    S3_BUCKETS_SIZE_GIG_GLOBAL=$((S3_BUCKETS_SIZE_GLOBAL/1000/1000/1000))
+    S3_BUCKETS_CREDIT_EXPOSURE_USAGE_GLOBAL=$((S3_BUCKETS_SIZE_GIG_GLOBAL/200))
+    S3_BUCKETS_CREDIT_FULL_USAGE_GLOBAL=$((S3_BUCKETS_SIZE_GIG_GLOBAL/33))
     echo ""
     echo "###################################################################################"
-    echo "Data Security Total Credit Consumption:"
-    echo "  For Exposure Scan: ${BUCKETS_CREDIT_EXPOSURE_USAGE_GLOBAL}"
-    echo "  For Full Scan: ${BUCKETS_CREDIT_FULL_USAGE_GLOBAL}"
+    echo "Data Security Total Size:"
+    echo "  Bytes: ${S3_BUCKETS_SIZE_GLOBAL}"
+    echo "  GB:    ${S3_BUCKETS_SIZE_GIG_GLOBAL}"
+    echo "Data Security Total Credit Consumption (based upon GB):"
+    echo "  For Exposure Scan: ${S3_BUCKETS_CREDIT_EXPOSURE_USAGE_GLOBAL}"
+    echo "  For Full Scan:     ${S3_BUCKETS_CREDIT_FULL_USAGE_GLOBAL}"
     echo "###################################################################################"
   fi
 
-  echo "Totals are based upon resource counts at the time that this script is executed."
   echo ""
+  echo "Totals are based upon resource counts at the time that this script is executed."
   echo "If you have any questions/concerns, please see the following licensing guide:"
   echo "https://www.paloaltonetworks.com/resources/guides/prisma-cloud-enterprise-edition-licensing-guide"
 }
