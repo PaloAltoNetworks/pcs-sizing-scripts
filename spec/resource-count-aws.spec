@@ -384,9 +384,9 @@ EOJ
     #
     When call count_account_resources
     The output should include "Count"
-    The variable BUCKETS_SIZE_GIG_GLOBAL should eq 423
-    The variable BUCKETS_CREDIT_EXPOSURE_USAGE_GLOBAL should eq 2
-    The variable BUCKETS_CREDIT_FULL_USAGE_GLOBAL should eq 12
+    The variable S3_BUCKETS_SIZE_GIG_GLOBAL should eq 1270
+    The variable S3_BUCKETS_CREDIT_EXPOSURE_USAGE_GLOBAL should eq 6
+    The variable S3_BUCKETS_CREDIT_FULL_USAGE_GLOBAL should eq 38
   End
 
 End
