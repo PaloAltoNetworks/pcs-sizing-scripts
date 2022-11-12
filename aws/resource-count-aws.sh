@@ -144,6 +144,31 @@ aws_ecs_list_tasks() {
   fi
 }
 
+aws_eks_list_clusters() {
+  RESULT=$(aws eks list-clusters --max-items 99999 --region="${1}" --output json --no-cli-pager 2>/dev/null)
+  if [ $? -eq 0 ]; then
+    echo "${RESULT}"
+  else
+    echo '{"Error": [] }'
+  fi
+}
+
+aws_eks_list_nodegroups() {
+  RESULT=$(aws eks list-nodegroups --cluster-name="${1}" --output json --no-cli-pager 2>/dev/null)
+  if [ $? -eq 0 ]; then
+    echo "${RESULT}"
+  fi
+}
+
+aws_eks_describe_nodegroup() {
+  RESULT=$(aws eks describe-nodegroup --cluster-name "${1}" --nodegroup-name "${2}" --output json --no-cli-pager 2>/dev/null)
+  if [ $? -eq 0 ]; then
+    echo "${RESULT}"
+  else
+    echo '{"Error": [] }'
+  fi
+}
+
 aws_ec2_describe_db_instances() {
   RESULT=$(aws rds describe-db-instances --max-items 99999 --region="${1}" --output json 2>/dev/null)
   if [ $? -eq 0 ]; then
@@ -225,6 +250,39 @@ get_ecs_fargate_task_count() {
   do
     ECS_FARGATE_TASK_LIST_COUNT=($(aws_ecs_list_tasks "${REGION}" --cluster "${CLUSTER}" --desired-status running --output json | jq -r '[.taskArns[]] | length' 2>/dev/null))
     RESULT=$((RESULT + ECS_FARGATE_TASK_LIST_COUNT))
+  done
+  echo "${RESULT}"
+}
+
+get_eks_cluster_node_count() {
+  REGION=$1
+  EKS_CLUSTERS=$(aws_eks_list_clusters "${REGION}" | jq -r '.clusters[]')
+
+  XIFS=$IFS
+  # shellcheck disable=SC2206
+  IFS=$'\n' EKS_CLUSTERS_LIST=($EKS_CLUSTERS)
+  IFS=$XIFS
+
+  RESULT=0
+
+  for CLUSTER in "${EKS_CLUSTERS_LIST[@]}"
+  do
+    EKS_NODEGROUPS=$(aws_eks_list_nodegroups "${CLUSTER}")
+    if [ "${EKS_NODEGROUPS}" != "" ]; then
+      EKS_NODEGROUPS=$(echo $EKS_NODEGROUPS | jq -r '.nodegroups[]' )
+
+      XIFS=$IFS
+      # shellcheck disable=SC2206
+      IFS=$'\n' EKS_NODEGROUP_LIST=($EKS_NODEGROUPS)
+      IFS=$XIFS
+
+      for NODEGROUP in "${EKS_NODEGROUP_LIST[@]}"
+      do
+        EKS_NODEGROUP_MAXSIZE=$(aws_eks_describe_nodegroup "${CLUSTER}" "${NODEGROUP}" | jq -r '.nodegroup.scalingConfig.maxSize' 2>/dev/null)
+        RESULT=$((RESULT + EKS_NODEGROUP_MAXSIZE))
+        echo "|${CLUSTER}|${NODEGROUP}|${EKS_NODEGROUP_MAXSIZE}|${RESULT}|" >> output.txt
+      done
+    fi
   done
   echo "${RESULT}"
 }
@@ -461,6 +519,18 @@ count_account_resources() {
       echo "###################################################################################"
       echo ""
 
+      echo "###################################################################################"
+      echo "EKS Clusters"
+      for i in "${REGION_LIST[@]}"
+      do
+        RESOURCE_COUNT=$(get_eks_cluster_node_count "${i}")
+        echo "  Count of Maximum EKS Cluster Nodes in Region ${i}: ${RESOURCE_COUNT}"
+        EKS_CLUSTER_NODE_COUNT=$((EKS_CLUSTER_NODE_COUNT + RESOURCE_COUNT))
+      done
+      echo "Total Maximum EKS Cluster Nodes across all regions: ${EKS_CLUSTER_NODE_COUNT}"
+      echo "###################################################################################"
+      echo ""
+
     fi
 
     if [ "${WITH_DATA}" = "true" ]; then
@@ -516,6 +586,7 @@ count_account_resources() {
     echo "CWP Total Credit Consumption:"
     echo "  Count of Lambda Functions: ${LAMBDA_COUNT_GLOBAL} Credit Consumption: ${LAMBDA_CREDIT_USAGE_GLOBAL}"
     echo "  Count of ECS Fargate Tasks: ${ECS_FARGATE_TASK_COUNT_GLOBAL}"
+    echo "  Count of Maximum EKS Cluster Nodes: ${EKS_CLUSTER_NODE_COUNT}"
     echo ""
     echo "CWP Total Credit Consumption: ${COMPUTE_CREDIT_USAGE_GLOBAL}"
     echo "###################################################################################"
