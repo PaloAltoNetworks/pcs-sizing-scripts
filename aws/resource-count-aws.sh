@@ -157,6 +157,8 @@ aws_eks_list_nodegroups() {
   RESULT=$(aws eks list-nodegroups --cluster-name="${1}" --output json --no-cli-pager 2>/dev/null)
   if [ $? -eq 0 ]; then
     echo "${RESULT}"
+  else
+    echo '{"Error": [] }'
   fi
 }
 
@@ -269,7 +271,7 @@ get_eks_cluster_node_count() {
   do
     EKS_NODEGROUPS=$(aws_eks_list_nodegroups "${CLUSTER}")
     if [ "${EKS_NODEGROUPS}" != "" ]; then
-      EKS_NODEGROUPS=$(echo $EKS_NODEGROUPS | jq -r '.nodegroups[]' )
+      EKS_NODEGROUPS=$(echo "$EKS_NODEGROUPS" | jq -r '.nodegroups[]' )
 
       XIFS=$IFS
       # shellcheck disable=SC2206
