@@ -187,6 +187,40 @@ EOJ
 EOJ
   }
 
+aws_eks_list_clusters() {
+  cat << EOJ
+  {
+    "clusters": [
+        "eks-cluster-1"
+    ]
+  }
+EOJ
+}
+
+aws_eks_list_nodegroups() {
+  cat << EOJ
+  {
+    "nodegroups": [
+        "nodes"
+    ]
+  }
+EOJ
+}
+
+aws_eks_describe_nodegroup() {
+  cat << EOJ
+  {
+    "nodegroup": {
+      "scalingConfig": {
+          "minSize": 2,
+          "maxSize": 4,
+          "desiredSize": 2
+      }
+    }
+  }
+EOJ
+}
+
   aws_ecs_list_clusters() {
     cat << EOJ
 {
@@ -282,6 +316,21 @@ EOJ
     The output should not include "Error"
   End
 
+  It 'returns a list of EKS Clusters'
+    When call aws_eks_list_clusters
+    The output should not include "Error"
+  End
+
+  It 'returns a list of nodegroups'
+    When call aws_eks_list_nodegroups
+    The output should not include "Error"
+  End
+
+  It 'returns details of a node group'
+    When call aws_eks_describe_nodegroup
+    The output should not include "Error"
+  End
+
   It 'returns a list of ECS Clusters'
     When call aws_ecs_list_clusters
     The output should not include "Error"
@@ -372,6 +421,7 @@ EOJ
     The output should include "Count"
     The variable LAMBDA_COUNT_GLOBAL should eq 12
     The variable LAMBDA_CREDIT_USAGE_GLOBAL should eq 2
+    The variable EKS_CLUSTER_NODE_COUNT should eq 16
   End
 
   It 'counts data size'
