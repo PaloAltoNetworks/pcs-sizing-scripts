@@ -44,7 +44,7 @@ fi
 
 oci_compartments_list() {
   # shellcheck disable=SC2086
-  RESULT=$(oci iam compartment list --all 2>/dev/null)
+  RESULT=$(oci iam compartment list --all --compartment-id-in-subtree true 2>/dev/null)
   if [ $? -eq 0 ]; then
     echo "${RESULT}"
   fi
