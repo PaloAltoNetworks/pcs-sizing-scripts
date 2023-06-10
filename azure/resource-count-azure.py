@@ -8,6 +8,8 @@
 # - az account list
 # - az resource list
 # - az vm list
+# - az aks list
+# - az aks show
 #
 # Instructions:
 #
@@ -16,6 +18,10 @@
 # - Upload the script
 # - Run the script:
 #       python3 resource-count-azure.py
+#
+# Limitations:
+#
+# - In this release, AKS nodes are only counted in the first node pool.
 ##########################################
 
 import subprocess
@@ -32,6 +38,7 @@ resource_mapping = {
 }
 
 global_az_resource_count = 0
+global_az_aks_node_count = 0
 error_list = []
 
 az_account_list = json.loads(subprocess.getoutput('az account list --all --output json 2>&1'))
@@ -42,9 +49,14 @@ for az_account in az_account_list:
     print('###################################################################################')
     print("Processing Account: {} ({})".format(az_account['name'], az_account['id']))
 
+    az_aks_node_count = 0
+    az_account_aks_node_count = 0
     az_account_resource_count = 0
     az_account_census = {}
 
+    #---------------------------------------------------------------
+    # Scan for running Azure VM's based on current Azure account id.
+    #---------------------------------------------------------------
     try:
         # Query for running VMs separately.
         az_vm_list_count = subprocess.getoutput("az vm list -d --query \"[?powerState=='VM running']\" --subscription {} --output json 2>&1 | jq '.[].id' | wc -l".format(az_account['id']))
@@ -57,6 +69,9 @@ for az_account in az_account_list:
         error_list.append(this_error)
         print(this_error)
 
+    #------------------------------------------------------------
+    # Scan for Azure resources based on current Azure account id.
+    #------------------------------------------------------------
     try:
         az_resource_list = subprocess.getoutput("az resource list --subscription {} --output json 2>&1".format(az_account['id']))
         az_resources = json.loads(az_resource_list)
@@ -69,15 +84,35 @@ for az_account in az_account_list:
                 else:
                     az_account_census[resource_mapping[resource_type]] = 1
         for resource_type, resource_count in sorted(az_account_census.items()):
-            print("{} : {}".format(resource_type, resource_count))
+            print("{}: {}".format(resource_type, resource_count))
     except Exception as e:
         this_error = "{} ({}) - Error executing 'az resource list'.".format(az_account['name'], az_account['id'])
         error_list.append(this_error)
         print(this_error)
 
+    #---------------------------------------------------------
+    # Scan for AKS clusters based on current Azure account id.
+    #---------------------------------------------------------
+    try:
+        az_aks_list = subprocess.getoutput("az aks list --subscription {} --output json 2>&1".format(az_account['id']))
+        az_aks_clusters = json.loads(az_aks_list)
+        for az_aks_cluster in az_aks_clusters:
+            az_aks_node_count = subprocess.getoutput("az aks show --name {} --resource-group {} --subscription {} --query agentPoolProfiles[0].count".format(az_aks_cluster['name'], az_aks_cluster['resourceGroup'], az_account['id']))
+            if int(az_aks_node_count) > 0:
+                print("  Cluster: " + az_aks_cluster['name'] + " - Nodes: " + az_aks_node_count)
+                az_account_aks_node_count += int(az_aks_node_count)
+
+
+    except Exception as e:
+        this_error = "{} ({}) - Error executing 'az aks list'.".format(az_account['name'], az_account['id'])
+        error_list.append(this_error)
+        print(this_error)
+
     print("Total Billable Resources: {}".format(az_account_resource_count))
+    print("Total AKS Nodes {}".format(az_account_aks_node_count))
     print('###################################################################################')
     global_az_resource_count += az_account_resource_count
+    global_az_aks_node_count += az_account_aks_node_count
 
 print()
 print('###################################################################################')
@@ -85,6 +120,8 @@ print("Grand Total Billable Resources: {}".format(global_az_resource_count))
 print()
 print("If you will be using the IAM Security Module, total billable resources will be: {}".format(round(global_az_resource_count * 1.25)))
 print('###################################################################################')
+print("Grand Total AKS Nodes: {} - Currently not added to billable resources (ex. VM's)".format(global_az_aks_node_count))
+print("Note: In this release, AKS nodes are only counted in the first node pool.")
 print()
 
 if error_list:
