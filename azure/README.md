@@ -17,6 +17,8 @@ The Azure APIs below need to be enabled in order to gather information from Azur
 * `az account list`
 * `az resource list`
 * `az vm list`
+* `az aks list`
+* `az aks show`
 
 ## Running the Script
 
@@ -31,3 +33,6 @@ Follow the steps below to run the script.
 1. Run the sizing script
     1. `python3 resource-count-azure.py`
 1. Share the results with your Palo Alto Networks team
+
+Limitations:
+- In this release, AKS nodes are only counted in the first node pool.
