@@ -4,6 +4,7 @@ Prisma Cloud Sizing Scripts
 PDF licensing guide located here: [https://www.paloaltonetworks.com/resources/guides/prisma-cloud-enterprise-edition-licensing-guide](https://www.paloaltonetworks.com/resources/guides/prisma-cloud-enterprise-edition-licensing-guide)
 
 * Please refer to the individual folders for instructions on running these scripts for each cloud provider/usage.
+* **Note:** The AWS, GCP, and Azure scripts were recently updated for improved error handling and performance (using Cloud Asset Inventory for GCP and Azure Resource Graph for Azure).
 
 ## Cloud Providers:
 

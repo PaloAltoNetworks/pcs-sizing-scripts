@@ -1,632 +1,484 @@
 #!/bin/bash
 
-# shellcheck disable=SC2102,SC2181,SC2207
-
-##########################################################################################
-# Instructions:
-#
-# - Make this script executable:
-#   chmod +x resource-count-aws.sh
-#
-# - Run this script:
-#   resource-count-aws.sh
-#   resource-count-aws.sh org (see below)
-#
-# API/CLI used:
-#
-# - aws organizations describe-organization (optional)
-# - aws organizations list-accounts (optional)
-# - aws sts assume-role (optional)
-#
-# - aws ec2 describe-instances
-# - aws rds describe-db-instances
-# - aws ec2 describe-nat-gateways
-# - aws redshift describe-clusters
-# - aws elb describe-load-balancer
-# - aws lambda get-account-settings (optional)
-# - aws ecs list-clusters (optional)
-# - aws ecs list-tasks (optional)
-# - aws s3api list-buckets (optional)
-# - aws s3api list-objects (optional)
-##########################################################################################
-
-##########################################################################################
-## Use of jq is required by this script.
-##########################################################################################
-
-if ! type "jq" > /dev/null; then
-  echo "Error: jq not installed or not in execution path, jq is required for script execution."
-  exit 1
+# Check for jq dependency
+if ! command -v jq &> /dev/null; then
+    echo "Error: jq is not installed. Please install jq to run this script."
+    echo "(e.g., 'sudo apt-get install jq' or 'sudo yum install jq' or 'brew install jq')"
+    exit 1
 fi
-
-##########################################################################################
-## Optionally query the AWS Organization by passing "org" as an argument.
-##########################################################################################
-
-if [ "${1}X" == "orgX" ] || [ "${2}X" == "orgX" ] || [ "${3}X" == "orgX" ]; then
-   USE_AWS_ORG="true"
-else
-   USE_AWS_ORG="false"
-fi
-
-##########################################################################################
-## Optionally report on Compute by passing "cwp" as an argument.
-##########################################################################################
-
-if [ "${1}X" == "cwpX" ] || [ "${2}X" = "cwpX" ] || [ "${3}X" == "cwpX" ]; then
-   WITH_CWP="true"
-else
-   WITH_CWP="false"
-fi
-
-##########################################################################################
-## Optionally report on S3 Bucket Size by passing "data" as an argument.
-## NOTE: This can take a long time depending on the size of your buckets
-##########################################################################################
-
-if [ "${1}X" == "dataX" ] || [ "${2}X" = "dataX" ] || [ "${3}X" == "dataX" ]; then
-   WITH_DATA="true"
-else
-   WITH_DATA="false"
-fi
-
-##########################################################################################
-## Utility functions.
-##########################################################################################
-
-error_and_exit() {
-  echo
-  echo "ERROR: ${1}"
-  echo
-  exit 1
-}
-
-##########################################################################################
-## AWS Utility functions.
-##########################################################################################
-
-aws_ec2_describe_regions() {
-  RESULT=$(aws ec2 describe-regions --output json 2>/dev/null)
-  if [ $? -eq 0 ]; then
-    echo "${RESULT}"
-  fi
-}
-
-####
-
-aws_organizations_describe_organization() {
-  RESULT=$(aws organizations describe-organization --output json 2>/dev/null)
-  if [ $? -eq 0 ]; then
-    echo "${RESULT}"
-  fi
-}
-
-aws_organizations_list_accounts() {
-  RESULT=$(aws organizations list-accounts --output json 2>/dev/null)
-  if [ $? -eq 0 ]; then
-    echo "${RESULT}"
-  fi
-}
-
-aws_sts_assume_role() {
-  RESULT=$(aws sts assume-role --role-arn="${1}" --role-session-name=pcs-sizing-script --duration-seconds=999 --output json 2>/dev/null)
-  if [ $? -eq 0 ]; then
-    echo "${RESULT}"
-  fi
-}
-
-####
-
-aws_ec2_describe_instances() {
-  RESULT=$(aws ec2 describe-instances --max-items 99999 --region="${1}" --filters "Name=instance-state-name,Values=running" --output json 2>/dev/null)
-  if [ $? -eq 0 ]; then
-    echo "${RESULT}"
-  else
-    echo '{"Error": [] }'
-  fi
-}
-
-aws_ecs_list_clusters() {
-  RESULT=$(aws ecs list-clusters --max-items 99999 --region="${1}" --output json 2>/dev/null)
-  if [ $? -eq 0 ]; then
-    echo "${RESULT}"
-  else
-    echo '{"Error": [] }'
-  fi
-}
-
-aws_ecs_list_tasks() {
-  RESULT=$(aws ecs list-tasks --max-items 99999 --region "${1}" --cluster "${2}" --desired-status running --output json 2>/dev/null)
-  if [ $? -eq 0 ]; then
-    echo "${RESULT}"
-  else
-    echo '{"Error": [] }'
-  fi
-}
-
-aws_eks_list_clusters() {
-  RESULT=$(aws eks list-clusters --max-items 99999 --region="${1}" --output json --no-cli-pager 2>/dev/null)
-  if [ $? -eq 0 ]; then
-    echo "${RESULT}"
-  else
-    echo '{"Error": [] }'
-  fi
-}
-
-aws_eks_list_nodegroups() {
-  RESULT=$(aws eks list-nodegroups --cluster-name="${1}" --output json --no-cli-pager 2>/dev/null)
-  if [ $? -eq 0 ]; then
-    echo "${RESULT}"
-  else
-    echo '{"Error": [] }'
-  fi
-}
-
-aws_eks_describe_nodegroup() {
-  RESULT=$(aws eks describe-nodegroup --cluster-name "${1}" --nodegroup-name "${2}" --output json --no-cli-pager 2>/dev/null)
-  if [ $? -eq 0 ]; then
-    echo "${RESULT}"
-  else
-    echo '{"Error": [] }'
-  fi
-}
-
-aws_ec2_describe_db_instances() {
-  RESULT=$(aws rds describe-db-instances --max-items 99999 --region="${1}" --output json 2>/dev/null)
-  if [ $? -eq 0 ]; then
-    echo "${RESULT}"
-  else
-    echo '{"Error": [] }'
-  fi
-}
-
-aws_ec2_describe_nat_gateways() {
-  RESULT=$(aws ec2 describe-nat-gateways --max-items 99999 --region="${1}" --output json 2>/dev/null)
-  if [ $? -eq 0 ]; then
-    echo "${RESULT}"
-  else
-    echo '{"Error": [] }'
-  fi
-}
-
-aws_redshift_describe_clusters() {
-  RESULT=$(aws redshift describe-clusters --max-items 99999 --region="${1}" --output json 2>/dev/null)
-  if [ $? -eq 0 ]; then
-    echo "${RESULT}"
-  else
-    echo '{"Error": [] }'
-  fi
-}
-
-aws_elb_describe_load_balancers() {
-  RESULT=$(aws elb describe-load-balancers --max-items 99999 --region="${1}" --output json 2>/dev/null)
-  if [ $? -eq 0 ]; then
-    echo "${RESULT}"
-  else
-    echo '{"Error": [] }'
-  fi
-}
-
-aws_lambda_get_account_settings() {
-  RESULT=$(aws lambda get-account-settings --region="${1}" --output json 2>/dev/null)
-  if [ $? -eq 0 ]; then
-    echo "${RESULT}"
-  else
-    echo '{"Error": [] }'
-  fi
-}
-
-aws_s3api_list_buckets() {
-  RESULT=$(aws s3api list-buckets --query "Buckets[].Name[]" --output json 2>/dev/null)
-  if [ $? -eq 0 ]; then
-    echo "${RESULT}"
-  else
-    echo '{"Error": [] }'
-  fi
-}
-
-aws_s3_ls_bucket_size() {
-  RESULT=$(aws s3api list-objects --bucket "${1}" --output json --query "sum(Contents[].Size)" 2>/dev/null)
-  if [ $? -eq 0 ]; then
-    echo "${RESULT}"
-  else
-    echo '-1'
-  fi
-}
-
-####
-
-get_ecs_fargate_task_count() {
-  REGION=$1
-  ECS_FARGATE_CLUSTERS=$(aws_ecs_list_clusters "${REGION}")
-
-  XIFS=$IFS
-  # shellcheck disable=SC2206
-  IFS=$'\n' ECS_FARGATE_CLUSTERS_LIST=($ECS_FARGATE_CLUSTERS)
-  IFS=$XIFS
-
-  ECS_FARGATE_TASK_LIST_COUNT=0
-  RESULT=0
-
-  for CLUSTER in "${ECS_FARGATE_CLUSTERS_LIST[@]}"
-  do
-    ECS_FARGATE_TASK_LIST_COUNT=($(aws_ecs_list_tasks "${REGION}" --cluster "${CLUSTER}" --desired-status running --output json | jq -r '[.taskArns[]] | length' 2>/dev/null))
-    RESULT=$((RESULT + ECS_FARGATE_TASK_LIST_COUNT))
-  done
-  echo "${RESULT}"
-}
-
-get_eks_cluster_node_count() {
-  REGION=$1
-  EKS_CLUSTERS=$(aws_eks_list_clusters "${REGION}" | jq -r '.clusters[]')
-
-  XIFS=$IFS
-  # shellcheck disable=SC2206
-  IFS=$'\n' EKS_CLUSTERS_LIST=($EKS_CLUSTERS)
-  IFS=$XIFS
-
-  RESULT=0
-
-  for CLUSTER in "${EKS_CLUSTERS_LIST[@]}"
-  do
-    EKS_NODEGROUPS=$(aws_eks_list_nodegroups "${CLUSTER}")
-    if [ "${EKS_NODEGROUPS}" != "" ]; then
-      EKS_NODEGROUPS=$(echo "$EKS_NODEGROUPS" | jq -r '.nodegroups[]' )
-
-      XIFS=$IFS
-      # shellcheck disable=SC2206
-      IFS=$'\n' EKS_NODEGROUP_LIST=($EKS_NODEGROUPS)
-      IFS=$XIFS
-
-      for NODEGROUP in "${EKS_NODEGROUP_LIST[@]}"
-      do
-        EKS_NODEGROUP_MAXSIZE=$(aws_eks_describe_nodegroup "${CLUSTER}" "${NODEGROUP}" | jq -r '.nodegroup.scalingConfig.maxSize' 2>/dev/null)
-        RESULT=$((RESULT + EKS_NODEGROUP_MAXSIZE))
-        echo "|${CLUSTER}|${NODEGROUP}|${EKS_NODEGROUP_MAXSIZE}|${RESULT}|" >> output.txt
-      done
+# Function to handle errors
+function check_error {
+    local exit_code=$1
+    local message=$2
+    if [ $exit_code -ne 0 ]; then
+        echo "Error: $message (Exit Code: $exit_code)"
+        # Optionally unset credentials if in org mode before exiting
+        if [ "$ORG_MODE" == true ] && [ -n "$AWS_SESSION_TOKEN" ]; then
+            unset AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN
+        fi
+        exit $exit_code
     fi
-  done
-  echo "${RESULT}"
 }
 
-get_s3_bucket_list() {
-  S3_BUCKETS=$(aws_s3api_list_buckets | jq -r '.[]' 2>/dev/null)
 
-  XIFS=$IFS
-  # shellcheck disable=SC2206
-  IFS=$'\n' S3_BUCKETS_LIST=($S3_BUCKETS)
-  IFS=$XIFS
-}
-
-####
-
-get_region_list() {
-  echo "###################################################################################"
-  echo "Querying AWS Regions"
-
-  REGIONS=$(aws_ec2_describe_regions | jq -r '.Regions[] | .RegionName' 2>/dev/null | sort)
-
-  XIFS=$IFS
-  # shellcheck disable=SC2206
-  IFS=$'\n' REGION_LIST=($REGIONS)
-  IFS=$XIFS
-
-  if [ ${#REGION_LIST[@]} -eq 0 ]; then
-    echo "  Warning: Using default region list"
-    REGION_LIST=(us-east-1 us-east-2 us-west-1 us-west-2 ap-south-1 ap-northeast-1 ap-northeast-2 ap-southeast-1 ap-southeast-2 eu-north-1 eu-central-1 eu-west-1 sa-east-1 eu-west-2 eu-west-3 ca-central-1)
-  fi
-
-  echo "  Total number of regions: ${#REGION_LIST[@]}"
-  echo "###################################################################################"
-  echo ""
-}
-
-get_account_list() {
-  if [ "${USE_AWS_ORG}" = "true" ]; then
-    echo "###################################################################################"
-    echo "Querying AWS Organization"
-    MASTER_ACCOUNT_ID=$(aws_organizations_describe_organization | jq -r '.Organization.MasterAccountId' 2>/dev/null)
-    if [ $? -ne 0 ] || [ -z "${MASTER_ACCOUNT_ID}" ]; then
-      error_and_exit "Error: Failed to describe AWS Organization, check aws cli setup, and access to the AWS Organizations API."
-    fi
-    # Save current environment variables of the master account.
-    MASTER_AWS_ACCESS_KEY_ID=$AWS_ACCESS_KEY_ID
-    MASTER_AWS_SECRET_ACCESS_KEY=$AWS_SECRET_ACCESS_KEY
-    MASTER_AWS_SESSION_TOKEN=$AWS_SESSION_TOKEN
-    #
-    ACCOUNT_LIST=$(aws_organizations_list_accounts)
-    if [ $? -ne 0 ] || [ -z "${ACCOUNT_LIST}" ]; then
-      error_and_exit "Error: Failed to list AWS Organization accounts, check aws cli setup, and access to the AWS Organizations API."
-    fi
-    TOTAL_ACCOUNTS=$(echo "${ACCOUNT_LIST}" | jq '.Accounts | length' 2>/dev/null)
-    echo "  Total number of member accounts: ${TOTAL_ACCOUNTS}"
-    echo "###################################################################################"
+function printHelp {
     echo ""
-  else
-    MASTER_ACCOUNT_ID=""
-    ACCOUNT_LIST=""
-    TOTAL_ACCOUNTS=1
-  fi
+    echo "NOTES:"
+    echo "* Requires AWS CLI v2 to execute"
+    echo "* Requires JQ utility to be installed (TODO: Install JQ from script; exists in AWS)"
+    echo "* Validated to run successfully from within CSP console CLIs"
+
+    echo "Available flags:"
+    echo " -c          Connect via SSM to EC2 instances running DBs in combination with DSPM mode"
+    echo " -d          DSPM mode"
+    echo "             This option will search for and count resources that are specific to data security"
+    echo "             posture management (DSPM) licensing."
+    echo " -h          Display the help info"
+    echo " -n <region> Single region to scan"
+    echo " -o          Organization mode"
+    echo "             This option will fetch all sub-accounts associated with an organization"
+    echo "             and assume the default (or specified) cross account role in order to iterate through and"
+    echo "             scan resources in each sub-account. This is typically run from the admin user in"
+    echo "             the master account."
+    echo " -r <role>   Specify a non default role to assume in combination with organization mode"
+    echo " -s          Include stopped compute instances in addition to running"
+    exit 1
 }
 
-assume_role() {
-  ACCOUNT_NAME="${1}"
-  ACCOUNT_ID="${2}"
-  echo "###################################################################################"
-  echo "Processing Account: ${ACCOUNT_NAME} (${ACCOUNT_ID})"
-  if [ "${ACCOUNT_ID}" = "${MASTER_ACCOUNT_ID}" ]; then
-    echo "  Account is the master account, skipping assume role ..."
-  else
-    ACCOUNT_ASSUME_ROLE_ARN="arn:aws:iam::${ACCOUNT_ID}:role/OrganizationAccountAccessRole"
-    SESSION_JSON=$(aws_sts_assume_role "${ACCOUNT_ASSUME_ROLE_ARN}")
-    if [ $? -ne 0 ] || [ -z "${SESSION_JSON}" ]; then
-      ASSUME_ROLE_ERROR="true"
-      echo "  Warning: Failed to assume role into Member Account ${ACCOUNT_NAME} (${ACCOUNT_ID}), skipping ..."
+spinpid=
+function __startspin {
+	# start the spinner
+	set +m
+	{ while : ; do for X in '  •     ' '   •    ' '    •   ' '     •  ' '      • ' '     •  ' '    •   ' '   •    ' '  •     ' ' •      ' ; do echo -en "\b\b\b\b\b\b\b\b$X" ; sleep 0.1 ; done ; done & } 2>/dev/null
+	spinpid=$!
+}
+
+function __stopspin {
+	# stop the spinner
+	{ kill -9 $spinpid && wait; } 2>/dev/null
+	set -m
+	echo -en "\033[2K\r"
+}
+
+
+echo ''
+echo '  ___     _                  ___ _             _  '
+echo ' | _ \_ _(_)____ __  __ _   / __| |___ _  _ __| | '
+echo ' |  _/ '\''_| (_-< '\''  \/ _` | | (__| / _ \ || / _` | '
+echo ' |_| |_| |_/__/_|_|_\__,_|  \___|_\___/\_,_\__,_| '
+echo ''                                                 
+
+# Ensure AWS CLI is configured
+aws sts get-caller-identity > /dev/null 2>&1
+check_error $? "AWS CLI not configured or credentials invalid. Please run 'aws configure'."
+
+# Initialize options
+ORG_MODE=false
+DSPM_MODE=false
+ROLE="OrganizationAccountAccessRole"
+REGION=""
+STATE="running"
+
+# Get options
+while getopts ":cdhn:or:s" opt; do
+  case ${opt} in
+    c) SSM_MODE=true ;;
+    d) DSPM_MODE=true ;;
+    h) printHelp ;;
+    n) REGION="$OPTARG" ;;
+    o) ORG_MODE=true ;;
+    r) ROLE="$OPTARG" ;;
+    s) STATE="running,stopped" ;;
+    *) echo "Invalid option: -${OPTARG}" && printHelp exit ;;
+ esac
+done
+shift $((OPTIND-1))
+
+# Get enabled regions for the current account context
+echo "Fetching enabled regions for the account..."
+activeRegions=$(aws account list-regions --region-opt-status-contains ENABLED ENABLED_BY_DEFAULT --query "Regions[].RegionName" --output text)
+check_error $? "Failed to list enabled AWS regions. Ensure 'account:ListRegions' permission is granted and AWS CLI is up-to-date."
+
+if [ -z "$activeRegions" ]; then
+    echo "Error: Could not retrieve list of enabled regions."
+    exit 1
+fi
+echo "Enabled regions found: $activeRegions"
+
+# Validate region flag
+if [[ "${REGION}" ]]; then
+    # Use grep -w for whole word match to avoid partial matches (e.g., "us-east" matching "us-east-1")
+    if echo "$activeRegions" | grep -qw "$REGION";
+        then echo "Requested region is valid";
+    else echo "Invalid region requested: $REGION";
+    exit 1
+    fi 
+fi
+
+if [ "$ORG_MODE" == true ]; then
+  echo "Organization mode active"
+  echo "Role to assume: $ROLE"
+fi
+if [ "$DSPM_MODE" == true ]; then
+  echo "DSPM mode active"
+fi
+
+# Initialize counters
+total_ec2_instances=0
+total_eks_nodes=0
+total_s3_buckets=0
+total_efs=0
+total_aurora=0
+total_rds=0
+total_dynamodb=0
+total_redshift=0
+total_ec2_db=0
+ec2_db_count=0
+
+# Functions
+check_running_databases() {
+    # # Ensure AWS CLI is configured
+    # if ! aws sts get-caller-identity &>/dev/null; then
+    #     echo "Please configure your AWS CLI using 'aws configure' before running this script."
+    #     return 1
+    # fi
+
+    # Required ports for database identification
+#    __startspin
+
+    local DATABASE_PORTS=(3306 5432 27017 1433 33060)
+
+    echo "Fetching all running EC2 instances..."
+    if [[ "${REGION}" ]]; then
+        local instances=$(aws ec2 describe-instances \
+        --region $REGION --filters "Name=instance-state-name,Values=$STATE" \
+        --query "Reservations[*].Instances[*].{ID:InstanceId,IP:PrivateIpAddress,Name:Tags[?Key=='Name']|[0].Value}" \
+        --output json)  
     else
-      # Export environment variables used to connect to this member account.
-      AWS_ACCESS_KEY_ID=$(echo "${SESSION_JSON}"     | jq .Credentials.AccessKeyId     2>/dev/null | sed -e 's/^"//' -e 's/"$//')
-      AWS_SECRET_ACCESS_KEY=$(echo "${SESSION_JSON}" | jq .Credentials.SecretAccessKey 2>/dev/null | sed -e 's/^"//' -e 's/"$//')
-      AWS_SESSION_TOKEN=$(echo "${SESSION_JSON}"     | jq .Credentials.SessionToken    2>/dev/null | sed -e 's/^"//' -e 's/"$//')
-      export AWS_ACCESS_KEY_ID
-      export AWS_SECRET_ACCESS_KEY
-      export AWS_SESSION_TOKEN
-    fi
-  fi
-  echo "###################################################################################"
-  echo ""
-}
+        local instances=$(aws ec2 describe-instances \
+        --filters "Name=instance-state-name,Values=$STATE" \
+        --query "Reservations[*].Instances[*].{ID:InstanceId,IP:PrivateIpAddress,Name:Tags[?Key=='Name']|[0].Value}" \
+        --output json)    
+    fi   
 
-##########################################################################################
-# Unset environment variables used to assume role into the last member account.
-##########################################################################################
-
-unassume_role() {
-  AWS_ACCESS_KEY_ID=$MASTER_AWS_ACCESS_KEY_ID
-  AWS_SECRET_ACCESS_KEY=$MASTER_AWS_SECRET_ACCESS_KEY
-  AWS_SESSION_TOKEN=$MASTER_AWS_SESSION_TOKEN
-}
-
-##########################################################################################
-## Set or reset counters.
-##########################################################################################
-
-reset_account_counters() {
-  EC2_INSTANCE_COUNT=0
-  RDS_INSTANCE_COUNT=0
-  NATGW_COUNT=0
-  REDSHIFT_COUNT=0
-  ELB_COUNT=0
-  LAMBDA_COUNT=0
-  ECS_FARGATE_TASK_COUNT=0
-  S3_BUCKETS_SIZE=0
-}
-
-reset_global_counters() {
-  EC2_INSTANCE_COUNT_GLOBAL=0
-  RDS_INSTANCE_COUNT_GLOBAL=0
-  REDSHIFT_COUNT_GLOBAL=0
-  NATGW_COUNT_GLOBAL=0
-  ELB_COUNT_GLOBAL=0
-  LAMBDA_COUNT_GLOBAL=0
-  ECS_FARGATE_TASK_COUNT_GLOBAL=0
-  S3_BUCKETS_SIZE_GLOBAL=0
-  S3_BUCKETS_CREDIT_EXPOSURE_USAGE_GLOBAL=0
-  S3_BUCKETS_CREDIT_FULL_USAGE_GLOBAL=0
-  WORKLOAD_COUNT_GLOBAL=0
-  WORKLOAD_COUNT_GLOBAL_WITH_IAM_MODULE=0
-  LAMBDA_CREDIT_USAGE_GLOBAL=0
-  COMPUTE_CREDIT_USAGE_GLOBAL=0
-}
-
-##########################################################################################
-## Iterate through the (or each member) account, region, and billable resource type.
-##########################################################################################
-
-count_account_resources() {
-  for ((ACCOUNT_INDEX=0; ACCOUNT_INDEX<=(TOTAL_ACCOUNTS-1); ACCOUNT_INDEX++))
-  do
-    if [ "${USE_AWS_ORG}" = "true" ]; then
-      ACCOUNT_NAME=$(echo "${ACCOUNT_LIST}" | jq -r .Accounts["${ACCOUNT_INDEX}"].Name 2>/dev/null)
-      ACCOUNT_ID=$(echo "${ACCOUNT_LIST}"   | jq -r .Accounts["${ACCOUNT_INDEX}"].Id   2>/dev/null)
-      ASSUME_ROLE_ERROR=""
-      assume_role "${ACCOUNT_NAME}" "${ACCOUNT_ID}"
-      if [ -n "${ASSUME_ROLE_ERROR}" ]; then
-        continue
-      fi
+    # Check if any instances were returned
+    if [[ -z "$instances" || "$instances" == "[]" ]]; then
+        echo "No running EC2 instances found."
+        return 0
     fi
 
-    echo "###################################################################################"
-    echo "Running EC2 Instances"
-    for i in "${REGION_LIST[@]}"
-    do
-      RESOURCE_COUNT=$(aws_ec2_describe_instances "${i}" | jq '[ .Reservations[].Instances[] ] | length' 2>/dev/null)
-      echo "  Count of Running EC2 Instances in Region ${i}: ${RESOURCE_COUNT}"
-      EC2_INSTANCE_COUNT=$((EC2_INSTANCE_COUNT + RESOURCE_COUNT))
+    echo "  Found running EC2 instances. Checking each instance for database activity..."
+
+    # Parse instances and check for databases
+    for instance in $(echo "$instances" | jq -c '.[][]'); do
+        local instance_id=$(echo "$instance" | jq -r '.ID')
+        local private_ip=$(echo "$instance" | jq -r '.IP')
+        local instance_name=$(echo "$instance" | jq -r '.Name // "Unnamed Instance"')
+
+        echo "  Checking instance: $instance_name (ID: $instance_id, IP: $private_ip)"
+
+        # Fetch security group details
+        local sg_ids=$(aws ec2 describe-instances \
+            --instance-ids "$instance_id" \
+            --query "Reservations[0].Instances[0].SecurityGroups[*].GroupId" \
+            --output text)
+
+        echo "    Security Groups: $sg_ids"
+
+        for sg_id in $sg_ids; do
+            local open_ports=$(aws ec2 describe-security-groups \
+                --group-ids "$sg_id" \
+                --query "SecurityGroups[0].IpPermissions[*].FromPort" \
+                --output text | tr '\t' ',' )
+
+            echo "      Open Ports: $open_ports"
+
+            # Check for database ports
+            for port in "${DATABASE_PORTS[@]}"; do
+                # Use grep -qw to check if the port exists as a whole word in the list of open ports
+                if echo "$open_ports" | grep -qw "$port"; then
+                    echo "      Database port $port detected in Security Group $sg_id"
+                    # Optionally break here if finding one DB port is enough, or continue to list all found
+                fi
+            done
+        done
+
+        # Optional: Check for running database processes via Systems Manager
+        if aws ssm describe-instance-information \
+            --query "InstanceInformationList[?InstanceId=='$instance_id']" \
+            --output text &>/dev/null; then
+            echo "    Instance is managed by Systems Manager. Checking for database processes..."
+            local command_id=$(aws ssm send-command \
+                --instance-ids "$instance_id" \
+                --document-name "AWS-RunShellScript" \
+                --comment "Check for running database processes" \
+                --parameters 'commands=["ps aux | grep -E \"postgres|mongo|mysql|mariadb|sqlserver\" | grep -v grep"]' \
+                --query "Command.CommandId" --output text)
+            check_error $? "Failed to send SSM command to instance $instance_id."
+
+            if [ -z "$command_id" ]; then
+                echo "    Warning: Failed to get Command ID for SSM check on $instance_id. Skipping process check."
+                continue # Skip to next instance
+            fi
+
+            echo "    SSM Command ID: $command_id. Waiting for completion..."
+            local ssm_status="Pending"
+            local ssm_output=""
+            local attempts=0
+            local max_attempts=12 # Wait for max 60 seconds (12 * 5s)
+
+            while [[ "$ssm_status" == "Pending" || "$ssm_status" == "InProgress" || "$ssm_status" == "Delayed" ]] && [ $attempts -lt $max_attempts ]; do
+                sleep 5
+                local invocation_details=$(aws ssm list-command-invocations --command-id "$command_id" --details --output json)
+                # Check if invocation details were retrieved
+                if [ -z "$invocation_details" ] || [ "$(echo "$invocation_details" | jq '.CommandInvocations | length')" -eq 0 ]; then
+                     echo "    Warning: Could not retrieve SSM invocation details for $command_id. Retrying..."
+                     attempts=$((attempts + 1))
+                     continue
+                fi
+                ssm_status=$(echo "$invocation_details" | jq -r '.CommandInvocations[0].Status')
+                ssm_output=$(echo "$invocation_details" | jq -r '.CommandInvocations[0].CommandPlugins[0].Output // ""')
+                echo "    SSM Status: $ssm_status (Attempt: $((attempts + 1))/$max_attempts)"
+                attempts=$((attempts + 1))
+            done
+
+            if [ "$ssm_status" != "Success" ]; then
+                echo "    Warning: SSM command execution did not succeed (Status: $ssm_status). Skipping process check result."
+                local ssm_error_output=$(echo "$invocation_details" | jq -r '.CommandInvocations[0].CommandPlugins[0].StandardErrorContent // ""')
+                 if [ -n "$ssm_error_output" ]; then
+                    echo "    SSM Error Output: $ssm_error_output"
+                 fi
+            elif [[ -n "$ssm_output" ]]; then
+                echo "    Database processes detected:"
+                # Indent the output for clarity
+                echo "$ssm_output" | sed 's/^/    /'
+                echo "    Total EC2 DBs incremented"
+                ec2_db_count=$((ec2_db_count + 1))
+            else
+                echo "    No database processes detected via SSM."
+            fi
+
+        else
+            echo "    Instance is not managed by Systems Manager. Skipping process check."
+        fi
     done
-    echo "Total EC2 Instances across all regions: ${EC2_INSTANCE_COUNT}"
-    echo "###################################################################################"
-    echo ""
 
-    echo "###################################################################################"
-    echo "RDS Instances"
-    for i in "${REGION_LIST[@]}"
-    do
-      RESOURCE_COUNT=$(aws_ec2_describe_db_instances "${i}" | jq '.[] | length' 2>/dev/null)
-      echo "  Count of RDS Instances in Region ${i}: ${RESOURCE_COUNT}"
-      RDS_INSTANCE_COUNT=$((RDS_INSTANCE_COUNT + RESOURCE_COUNT))
-    done
-    echo "Total RDS Instances across all regions: ${RDS_INSTANCE_COUNT}"
-    echo "###################################################################################"
-    echo ""
+    echo "  Database scan complete."
+    echo "  EC2 DB instances: $ec2_db_count"
+    total_ec2_db=$((total_ec2_db + ec2_db_count))
 
-    echo "###################################################################################"
-    echo "NAT Gateways"
-    for i in "${REGION_LIST[@]}"
-    do
-      RESOURCE_COUNT=$(aws_ec2_describe_nat_gateways "${i}" | jq '.[] | length' 2>/dev/null)
-      echo "  Count of NAT Gateways in Region ${i}: ${RESOURCE_COUNT}"
-      NATGW_COUNT=$((NATGW_COUNT + RESOURCE_COUNT))
-    done
-    echo "Total NAT Gateways across all regions: ${NATGW_COUNT}"
-    echo "###################################################################################"
-    echo ""
-
-    echo "###################################################################################"
-    echo "RedShift Clusters"
-    for i in "${REGION_LIST[@]}"
-    do
-      RESOURCE_COUNT=$(aws_redshift_describe_clusters "${i}" | jq '.[] | length' 2>/dev/null)
-      echo "  Count of RedShift Clusters in Region: ${i}: ${RESOURCE_COUNT}"
-      REDSHIFT_COUNT=$((REDSHIFT_COUNT + RESOURCE_COUNT))
-    done
-    echo "Total RedShift Clusters across all regions: ${REDSHIFT_COUNT}"
-    echo "###################################################################################"
-    echo ""
-
-    echo "###################################################################################"
-    echo "ELBs"
-    for i in "${REGION_LIST[@]}"
-    do
-      RESOURCE_COUNT=$(aws_elb_describe_load_balancers "${i}" | jq '.[] | length' 2>/dev/null)
-      echo " Count of ELBs in Region ${i}: ${RESOURCE_COUNT}"
-      ELB_COUNT=$((ELB_COUNT + RESOURCE_COUNT))
-    done
-    echo "Total ELBs across all regions: ${ELB_COUNT}"
-    echo "###################################################################################"
-    echo ""
-
-    if [ "${WITH_CWP}" = "true" ]; then
-
-      echo "###################################################################################"
-      echo "Lambda Functions"
-      for i in "${REGION_LIST[@]}"
-      do
-        RESOURCE_COUNT=$(aws_lambda_get_account_settings "${i}" | jq '.AccountUsage.FunctionCount' 2>/dev/null)
-        echo " Count of Lambda Functions in Region ${i}: ${RESOURCE_COUNT}"
-        LAMBDA_COUNT=$((LAMBDA_COUNT + RESOURCE_COUNT))
-      done
-      echo "Total Lambda Functions across all regions: ${LAMBDA_COUNT}"
-      echo "###################################################################################"
-      echo ""
-
-      echo "###################################################################################"
-      echo "ECS Fargate Tasks"
-      for i in "${REGION_LIST[@]}"
-      do
-        RESOURCE_COUNT=$(get_ecs_fargate_task_count "${i}")
-        echo "  Count of Running ECS Tasks in Region ${i}: ${RESOURCE_COUNT}"
-        ECS_FARGATE_TASK_COUNT=$((ECS_FARGATE_TASK_COUNT + RESOURCE_COUNT))
-      done
-      echo "Total ECS Fargate Task Count (Instances) across all regions: ${ECS_FARGATE_TASK_COUNT}"
-      echo "###################################################################################"
-      echo ""
-
-      echo "###################################################################################"
-      echo "EKS Clusters"
-      for i in "${REGION_LIST[@]}"
-      do
-        RESOURCE_COUNT=$(get_eks_cluster_node_count "${i}")
-        echo "  Count of Maximum EKS Cluster Nodes in Region ${i}: ${RESOURCE_COUNT}"
-        EKS_CLUSTER_NODE_COUNT=$((EKS_CLUSTER_NODE_COUNT + RESOURCE_COUNT))
-      done
-      echo "Total Maximum EKS Cluster Nodes across all regions: ${EKS_CLUSTER_NODE_COUNT}"
-      echo "###################################################################################"
-      echo ""
-
-    fi
-
-    if [ "${WITH_DATA}" = "true" ]; then
-      echo "###################################################################################"
-      echo "S3 Bucket Sizes"
-      get_s3_bucket_list
-      for i in "${S3_BUCKETS_LIST[@]}"
-        do
-        S3_BUCKET_SIZE=$(aws_s3_ls_bucket_size "${i}" 2>/dev/null)
-        echo "  Size of S3 Bucket ${i}: ${S3_BUCKET_SIZE} bytes"
-        S3_BUCKETS_SIZE=$((S3_BUCKETS_SIZE + S3_BUCKET_SIZE))
-      done
-      echo "Total S3 Buckets Size: ${S3_BUCKETS_SIZE} bytes"
-      echo "###################################################################################"
-      echo ""
-    fi
-
-    EC2_INSTANCE_COUNT_GLOBAL=$((EC2_INSTANCE_COUNT_GLOBAL + EC2_INSTANCE_COUNT))
-    RDS_INSTANCE_COUNT_GLOBAL=$((RDS_INSTANCE_COUNT_GLOBAL + RDS_INSTANCE_COUNT))
-    NATGW_COUNT_GLOBAL=$((NATGW_COUNT_GLOBAL + NATGW_COUNT))
-    REDSHIFT_COUNT_GLOBAL=$((REDSHIFT_COUNT_GLOBAL + REDSHIFT_COUNT))
-    ELB_COUNT_GLOBAL=$((ELB_COUNT_GLOBAL + ELB_COUNT))
-    LAMBDA_COUNT_GLOBAL=$((LAMBDA_COUNT_GLOBAL + LAMBDA_COUNT))
-    ECS_FARGATE_TASK_COUNT_GLOBAL=$((ECS_FARGATE_TASK_COUNT_GLOBAL + ECS_FARGATE_TASK_COUNT))
-    S3_BUCKETS_SIZE_GLOBAL=$((S3_BUCKETS_SIZE_GLOBAL + S3_BUCKETS_SIZE))
-
-    reset_account_counters
-
-    if [ "${USE_AWS_ORG}" = "true" ]; then
-      unassume_role
-    fi
-  done
-
-  WORKLOAD_COUNT_GLOBAL=$((EC2_INSTANCE_COUNT_GLOBAL + RDS_INSTANCE_COUNT_GLOBAL + NATGW_COUNT_GLOBAL + REDSHIFT_COUNT_GLOBAL + ELB_COUNT_GLOBAL))
-  WORKLOAD_COUNT_GLOBAL_WITH_IAM_MODULE=$((WORKLOAD_COUNT_GLOBAL*125/100))
-  echo "###################################################################################"
-  echo "CSPM: Total Billable Resources:"
-  echo "  Count of EC2 Instances:     ${EC2_INSTANCE_COUNT_GLOBAL}"
-  echo "  Count of RDS Instances:     ${RDS_INSTANCE_COUNT_GLOBAL}"
-  echo "  Count of NAT Gateways:      ${NATGW_COUNT_GLOBAL}"
-  echo "  Count of RedShift Clusters: ${REDSHIFT_COUNT_GLOBAL}"
-  echo "  Count of ELBs:              ${ELB_COUNT_GLOBAL}"
-  echo ""
-  echo "CSPM: Total Credit Consumption: ${WORKLOAD_COUNT_GLOBAL}"
-  echo "(If using the IAM Security Module: ${WORKLOAD_COUNT_GLOBAL_WITH_IAM_MODULE})"
-  echo "###################################################################################"
-
-  if [ "${WITH_CWP}" = "true" ]; then
-    LAMBDA_CREDIT_USAGE_GLOBAL=$((LAMBDA_COUNT_GLOBAL/6))
-    COMPUTE_CREDIT_USAGE_GLOBAL=$((LAMBDA_CREDIT_USAGE_GLOBAL + ECS_FARGATE_TASK_COUNT_GLOBAL))
-    echo ""
-    echo "###################################################################################"
-    echo "CWP Total Credit Consumption:"
-    echo "  Count of Lambda Functions: ${LAMBDA_COUNT_GLOBAL} Credit Consumption: ${LAMBDA_CREDIT_USAGE_GLOBAL}"
-    echo "  Count of ECS Fargate Tasks: ${ECS_FARGATE_TASK_COUNT_GLOBAL}"
-    echo "  Count of Maximum EKS Cluster Nodes: ${EKS_CLUSTER_NODE_COUNT}"
-    echo ""
-    echo "CWP Total Credit Consumption: ${COMPUTE_CREDIT_USAGE_GLOBAL}"
-    echo "###################################################################################"
-  fi
-
-  if [ "${WITH_DATA}" = "true" ]; then
-    S3_BUCKETS_SIZE_GIG_GLOBAL=$((S3_BUCKETS_SIZE_GLOBAL/1000/1000/1000))
-    S3_BUCKETS_CREDIT_EXPOSURE_USAGE_GLOBAL=$((S3_BUCKETS_SIZE_GIG_GLOBAL/200))
-    S3_BUCKETS_CREDIT_FULL_USAGE_GLOBAL=$((S3_BUCKETS_SIZE_GIG_GLOBAL/33))
-    echo ""
-    echo "###################################################################################"
-    echo "Data Security Total Size:"
-    echo "  Bytes: ${S3_BUCKETS_SIZE_GLOBAL}"
-    echo "  GB:    ${S3_BUCKETS_SIZE_GIG_GLOBAL}"
-    echo "Data Security Total Credit Consumption (based upon GB):"
-    echo "  For Exposure Scan: ${S3_BUCKETS_CREDIT_EXPOSURE_USAGE_GLOBAL}"
-    echo "  For Full Scan:     ${S3_BUCKETS_CREDIT_FULL_USAGE_GLOBAL}"
-    echo "###################################################################################"
-  fi
-
-  echo ""
-  echo "Totals are based upon resource counts at the time that this script is executed."
-  echo "If you have any questions/concerns, please see the following licensing guide:"
-  echo "https://www.paloaltonetworks.com/resources/guides/prisma-cloud-enterprise-edition-licensing-guide"
+#__stopspin
 }
 
-##########################################################################################
-# Allow shellspec to source this script.
-##########################################################################################
+# Function to count resources in a single account
+count_resources() {
+#    __startspin
+    
+    local account_id=$1
 
-${__SOURCED__:+return}
+    if [ "$ORG_MODE" == true ]; then
+        # Assume role in the account (replace "OrganizationAccountAccessRole" with your role name if different)
+        # Capture stderr to prevent it from cluttering the output if it fails
+        creds=$(aws sts assume-role --role-arn "arn:aws:iam::$account_id:role/$ROLE" \
+            --role-session-name "OrgSession" --query "Credentials" --output json 2> /dev/null)
+        local assume_role_exit_code=$?
 
-##########################################################################################
-# Main.
-##########################################################################################
+        if [ $assume_role_exit_code -ne 0 ]; then
+            echo "  Warning: Unable to assume role '$ROLE' in account $account_id (Exit Code: $assume_role_exit_code). Skipping account..."
+            # No need to unset creds as they weren't successfully set
+            return
+        fi
 
-get_account_list
-get_region_list
-reset_account_counters
-reset_global_counters
-count_account_resources
+        # Double check creds are not empty even if command succeeded
+        if [ -z "$creds" ]; then
+             echo "  Warning: Assumed role in account $account_id but credentials seem empty. Skipping account..."
+             return
+        fi
+
+        # Export temporary credentials
+        export AWS_ACCESS_KEY_ID=$(echo $creds | jq -r ".AccessKeyId")
+        export AWS_SECRET_ACCESS_KEY=$(echo $creds | jq -r ".SecretAccessKey")
+        export AWS_SESSION_TOKEN=$(echo $creds | jq -r ".SessionToken")
+    fi
+
+
+    if [ "$DSPM_MODE" == false ]; then
+        echo "Counting Cloud Security resources in account: $account_id"
+       
+        # Count EC2 instances
+        if [[ "${REGION}" ]]; then
+            ec2_count=$(aws ec2 describe-instances --region $REGION --filters "Name=instance-state-name,Values=$STATE" --query "Reservations[*].Instances[*]" --output json | jq 'length')
+            check_error $? "Failed to describe EC2 instances in region $REGION for account $account_id."
+        else
+            echo "  Counting EC2 instances across all accessible regions..."
+            ec2_count=0
+            # Use the activeRegions variable fetched earlier
+            for r in $activeRegions; do
+                # Capture stderr to avoid cluttering output for regions where API might not be enabled/accessible
+                count_in_region=$(aws ec2 describe-instances --region "$r" --filters "Name=instance-state-name,Values=$STATE" --query "Reservations[*].Instances[*]" --output json 2>/dev/null | jq 'length')
+                if [ $? -eq 0 ] && [[ "$count_in_region" =~ ^[0-9]+$ ]]; then
+                    # Only print if count > 0 to reduce noise
+                    if [ "$count_in_region" -gt 0 ]; then
+                       echo "    Region $r: $count_in_region instances"
+                    fi
+                    ec2_count=$((ec2_count + count_in_region))
+                fi
+            done
+        fi
+        echo "  EC2 instances: $ec2_count"
+        total_ec2_instances=$((total_ec2_instances + ec2_count))
+
+        # Count EKS nodes
+        if [[ "${REGION}" ]]; then
+            clusters=$(aws eks list-clusters --region $REGION --query "clusters" --output text)
+            check_error $? "Failed to list EKS clusters in region $REGION for account $account_id."
+        else
+            clusters=$(aws eks list-clusters --query "clusters" --output text)
+            check_error $? "Failed to list EKS clusters (all regions) for account $account_id."
+        fi        
+        for cluster in $clusters; do
+            node_groups=$(aws eks list-nodegroups --cluster-name "$cluster" --query 'nodegroups' --output text)
+            # If listing nodegroups fails, log warning and skip this cluster
+            if [ $? -ne 0 ]; then
+                echo "    Warning: Failed to list nodegroups for EKS cluster '$cluster' in account $account_id. Skipping cluster."
+                continue
+            fi
+            total_nodes=0
+            for node_group in $node_groups; do
+                node_count=$(aws eks describe-nodegroup --cluster-name "$cluster" --nodegroup-name "$node_group" --query "nodegroup.scalingConfig.desiredSize" --output text)
+                # If describing nodegroup fails, log warning and skip this nodegroup
+                if [ $? -ne 0 ]; then
+                    echo "    Warning: Failed to describe nodegroup '$node_group' for cluster '$cluster' in account $account_id. Skipping nodegroup."
+                    continue
+                fi
+                total_nodes=$((total_nodes + node_count))
+                echo "  EKS cluster '$cluster' nodegroup $node_group nodes: $node_count"
+                total_eks_nodes=$((total_eks_nodes + node_count))
+            done
+        done
+    fi
+
+    if [ "$DSPM_MODE" == true ]; then
+        echo "Counting DSPM Security resources in account: $account_id"
+        # Count S3 buckets
+        if [[ "${REGION}" ]]; then
+            s3_count=$(aws s3api list-buckets --region $REGION --query "Buckets[*].Name" --output text | wc -w)
+            check_error $? "Failed to list S3 buckets in region $REGION for account $account_id."
+        else
+            s3_count=$(aws s3api list-buckets --query "Buckets[*].Name" --output text | wc -w)
+            check_error $? "Failed to list S3 buckets (all regions) for account $account_id."
+        fi   
+        echo "  S3 buckets: $s3_count"
+        total_s3_buckets=$((total_s3_buckets + s3_count))
+
+        # Count EFS file systems
+        if [[ "${REGION}" ]]; then
+            efs_count=$(aws efs describe-file-systems --region $REGION --query "FileSystems[*].FileSystemId" --output text | wc -w)
+            check_error $? "Failed to describe EFS file systems in region $REGION for account $account_id."
+        else
+            efs_count=$(aws efs describe-file-systems --query "FileSystems[*].FileSystemId" --output text | wc -w)
+            check_error $? "Failed to describe EFS file systems (all regions) for account $account_id."
+        fi  
+        echo "  EFS file systems: $efs_count"
+        total_efs=$((total_efs + efs_count))
+
+        # Count Aurora clusters
+        if [[ "${REGION}" ]]; then
+            aurora_count=$(aws rds describe-db-clusters --region $REGION --query "DBClusters[?Engine=='aurora'].DBClusterIdentifier" --output text | wc -w)
+            check_error $? "Failed to describe Aurora clusters in region $REGION for account $account_id."
+        else
+            aurora_count=$(aws rds describe-db-clusters --query "DBClusters[?Engine=='aurora'].DBClusterIdentifier" --output text | wc -w)
+            check_error $? "Failed to describe Aurora clusters (all regions) for account $account_id."
+        fi         
+        echo "  Aurora clusters: $aurora_count"
+        total_aurora=$((total_aurora + aurora_count))
+
+        # Count RDS instances
+        if [[ "${REGION}" ]]; then
+            rds_count=$(aws rds describe-db-instances --region $REGION --query "DBInstances[?Engine=='mysql' || Engine=='mariadb' || Engine=='postgres'].DBInstanceIdentifier" --output text | wc -w)
+            check_error $? "Failed to describe RDS instances in region $REGION for account $account_id."
+        else
+            rds_count=$(aws rds describe-db-instances --query "DBInstances[?Engine=='mysql' || Engine=='mariadb' || Engine=='postgres'].DBInstanceIdentifier" --output text | wc -w)
+            check_error $? "Failed to describe RDS instances (all regions) for account $account_id."
+        fi   
+        echo "  RDS instances (MySQL, MariaDB, PostgreSQL): $rds_count"
+        total_rds=$((total_rds + rds_count))
+
+        # Count DynamoDB tables
+        if [[ "${REGION}" ]]; then
+            dynamodb_count=$(aws dynamodb list-tables --region $REGION --query "TableNames" --output text | wc -w)
+            check_error $? "Failed to list DynamoDB tables in region $REGION for account $account_id."
+        else
+            dynamodb_count=$(aws dynamodb list-tables --query "TableNames" --output text | wc -w)
+            check_error $? "Failed to list DynamoDB tables (all regions) for account $account_id."
+        fi 
+        echo "  DynamoDB tables: $dynamodb_count"
+        total_dynamodb=$((total_dynamodb + dynamodb_count))
+
+        # Count Redshift clusters
+        if [[ "${REGION}" ]]; then
+            redshift_count=$(aws redshift describe-clusters --region $REGION --query "Clusters[*].ClusterIdentifier" --output text | wc -w)
+            check_error $? "Failed to describe Redshift clusters in region $REGION for account $account_id."
+        else
+            redshift_count=$(aws redshift describe-clusters --query "Clusters[*].ClusterIdentifier" --output text | wc -w)
+            check_error $? "Failed to describe Redshift clusters (all regions) for account $account_id."
+        fi 
+        echo "  Redshift clusters: $redshift_count"
+        total_redshift=$((total_redshift + redshift_count))
+ 
+   	if [ "$SSM_MODE" == true ]; then
+    	check_running_databases
+    	fi
+    
+    fi
+
+    # Unset temporary credentials only if they were successfully set
+    if [ "$ORG_MODE" == true ] && [ -n "$AWS_SESSION_TOKEN" ]; then
+        # Unset temporary credentials
+        unset AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN
+    fi
+
+#    __stopspin
+}
+
+# Main logic
+if [ "$ORG_MODE" == true ]; then
+    # Get the list of all accounts in the AWS Organization
+    # Filter for ACTIVE accounts only
+    accounts=$(aws organizations list-accounts --query "Accounts[?Status=='ACTIVE'].Id" --output text)
+    check_error $? "Failed to list accounts in the organization. Ensure you have 'organizations:ListAccounts' permission."
+
+    if [ -z "$accounts" ]; then
+        echo "No accounts found in the organization."
+        exit 0
+    fi
+
+    # Loop through each account in the organization
+    for account_id in $accounts; do
+        count_resources "$account_id"
+    done
+else
+    # Run for the standalone account
+    current_account=$(aws sts get-caller-identity --query "Account" --output text)
+    check_error $? "Failed to get caller identity for the current account."
+    count_resources "$current_account"
+fi
+
+if [ "$ORG_MODE" == true ] && [ "$DSPM_MODE" == false ]; then
+    echo ""
+    echo "** TOTAL COUNTS **"
+    echo "  EC2 instances: $total_ec2_instances"
+    echo "  EKS nodes: $total_eks_nodes"
+fi
+
+if [ "$ORG_MODE" == true ] && [ "$DSPM_MODE" == true ]; then
+    echo ""
+    echo "** TOTAL DSPM COUNTS **"
+    echo "  S3 buckets: $total_s3_buckets"
+    echo "  EFS file systems: $total_efs"
+    echo "  Aurora clusters: $total_aurora"
+    echo "  RDS instances: $total_rds"
+    echo "  DynamoDB tables: $total_dynamodb"
+    echo "  Redshift clusters: $total_redshift"
+    echo "  EC2 DBs: $total_ec2_db"
+fi
