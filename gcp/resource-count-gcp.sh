@@ -87,11 +87,12 @@ else
     fi
 fi
 
-echo "Counting Compute Engine instances and GKE nodes in organization: $ORG_ID"
+echo "Counting Compute Engine instances, GKE nodes, and Cloud Functions in organization: $ORG_ID"
 
 # Initialize counters
 total_compute_instances=0
 total_gke_nodes=0
+total_cloud_functions=0 # Added
 
 # --- Optimized Instance Counting ---
 echo "Counting Compute Engine instances across organization $ORG_ID using Cloud Asset Inventory..."
@@ -154,10 +155,27 @@ else
 fi
 echo "  Total GKE nodes found: $total_gke_nodes"
 
+# --- Optimized Cloud Function Counting ---
+echo "Counting Cloud Functions across organization $ORG_ID using Cloud Asset Inventory..."
+# Use gcloud asset search to find all Cloud Functions (Gen1 and Gen2) and count them
+# Requires Cloud Asset API enabled (cloudasset.googleapis.com) and roles/cloudasset.viewer permission at the org level
+# Asset type for Gen1/Gen2 functions: cloudfunctions.googleapis.com/CloudFunction
+function_list=$(gcloud asset search-all-resources --scope=organizations/$ORG_ID --asset-types='cloudfunctions.googleapis.com/CloudFunction' --format='value(name)' --quiet)
+check_error $? "Failed to search for Cloud Functions using Cloud Asset Inventory. Ensure API is enabled and permissions are set."
+
+if [ -n "$function_list" ]; then
+    total_cloud_functions=$(echo "$function_list" | wc -l)
+else
+    total_cloud_functions=0
+fi
+echo "  Total Cloud Functions found: $total_cloud_functions"
+
+
 echo "##########################################"
 echo "Prisma Cloud GCP inventory collection complete."
 echo ""
-echo "VM Summary all projects:"
+echo "Resource Summary (Organization: $ORG_ID):"
 echo "==============================="
 echo "VM Instances:      $total_compute_instances"
 echo "GKE container VMs: $total_gke_nodes"
+echo "Cloud Functions:   $total_cloud_functions" # Added
