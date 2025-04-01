@@ -30,6 +30,7 @@ echo "Counting resources across accessible subscriptions using Azure Resource Gr
 # Initialize counts
 total_vm_count=0
 total_node_count=0
+total_function_app_count=0 # Added
 
 # --- Count VMs using Azure Resource Graph ---
 echo "Querying Azure Resource Graph for VM count..."
@@ -72,11 +73,32 @@ else
 fi
 echo "Total AKS container VMs (nodes) found: $total_node_count"
 
+# --- Count Azure Functions (Function Apps) using Azure Resource Graph ---
+echo "Querying Azure Resource Graph for Azure Function App count..."
+# Query for App Services of kind 'functionapp'
+function_query="Resources | where type =~ 'microsoft.web/sites' and kind contains 'functionapp' | count"
+function_result_json=$(az graph query -q "$function_query" --output json)
+function_query_exit_code=$?
+
+if [ $function_query_exit_code -ne 0 ]; then
+    echo "  Warning: Failed to query Azure Resource Graph for Function Apps (Exit Code: $function_query_exit_code). Assuming 0 Function Apps."
+    total_function_app_count=0
+else
+    # Extract count using jq
+    total_function_app_count=$(echo "$function_result_json" | jq '.count // 0')
+    if ! [[ "$total_function_app_count" =~ ^[0-9]+$ ]]; then
+         echo "  Warning: Could not parse Function App count from Resource Graph result. Assuming 0 Function Apps."
+         total_function_app_count=0
+    fi
+fi
+echo "Total Azure Function Apps found: $total_function_app_count"
+
 
 echo "##########################################"
 echo "Prisma Cloud Azure inventory collection complete (using Azure Resource Graph)."
 echo ""
-echo "VM Summary (all accessible subscriptions):"
+echo "Resource Summary (all accessible subscriptions):"
 echo "==============================="
 echo "VM Instances:      $total_vm_count"
 echo "AKS container VMs: $total_node_count"
+echo "Azure Function Apps: $total_function_app_count" # Added
