@@ -78,6 +78,7 @@ DSPM_MODE=false
 ROLE="OrganizationAccountAccessRole"
 REGION=""
 STATE="running"
+SSM_MODE=false # Initialize SSM_MODE
 
 # Get options
 while getopts ":cdhn:or:s" opt; do
@@ -126,6 +127,10 @@ fi
 # Initialize counters
 total_ec2_instances=0
 total_eks_nodes=0
+total_eks_clusters=0
+total_docker_hosts=0
+total_ecs_clusters=0 # Added
+total_ecs_tasks=0    # Added
 total_s3_buckets=0
 total_efs=0
 total_aurora=0
@@ -133,352 +138,663 @@ total_rds=0
 total_dynamodb=0
 total_redshift=0
 total_ec2_db=0
-ec2_db_count=0
+ec2_db_count=0 # Local counter for check_running_databases
 
 # Functions
 check_running_databases() {
-    # # Ensure AWS CLI is configured
-    # if ! aws sts get-caller-identity &>/dev/null; then
-    #     echo "Please configure your AWS CLI using 'aws configure' before running this script."
-    #     return 1
-    # fi
-
     # Required ports for database identification
-#    __startspin
-
     local DATABASE_PORTS=(3306 5432 27017 1433 33060)
 
-    echo "Fetching all running EC2 instances..."
+    echo "Fetching all $STATE EC2 instances for DB check..."
+    local instances_json # Use a local variable for JSON output
     if [[ "${REGION}" ]]; then
-        local instances=$(aws ec2 describe-instances \
-        --region $REGION --filters "Name=instance-state-name,Values=$STATE" \
+        instances_json=$(aws ec2 describe-instances \
+        --region "$REGION" --filters "Name=instance-state-name,Values=$STATE" \
         --query "Reservations[*].Instances[*].{ID:InstanceId,IP:PrivateIpAddress,Name:Tags[?Key=='Name']|[0].Value}" \
-        --output json)  
+        --output json)
     else
-        local instances=$(aws ec2 describe-instances \
+        instances_json=$(aws ec2 describe-instances \
         --filters "Name=instance-state-name,Values=$STATE" \
         --query "Reservations[*].Instances[*].{ID:InstanceId,IP:PrivateIpAddress,Name:Tags[?Key=='Name']|[0].Value}" \
-        --output json)    
-    fi   
+        --output json)
+    fi
+    local describe_exit_code=$?
+    if [ $describe_exit_code -ne 0 ]; then
+        echo "  Warning: Failed to describe EC2 instances for DB check (Exit Code: $describe_exit_code). Skipping DB check."
+        return
+    fi
 
     # Check if any instances were returned
-    if [[ -z "$instances" || "$instances" == "[]" ]]; then
-        echo "No running EC2 instances found."
+    if [[ -z "$instances_json" || "$instances_json" == "[]" || "$(echo "$instances_json" | jq 'flatten | length')" -eq 0 ]]; then
+        echo "  No $STATE EC2 instances found for DB check."
         return 0
     fi
 
-    echo "  Found running EC2 instances. Checking each instance for database activity..."
+    echo "  Found $STATE EC2 instances. Checking each instance for database activity..."
+    ec2_db_count=0 # Reset local counter for this account/run
 
     # Parse instances and check for databases
-    for instance in $(echo "$instances" | jq -c '.[][]'); do
+    echo "$instances_json" | jq -c '.[] | .[]' | while IFS= read -r instance; do
         local instance_id=$(echo "$instance" | jq -r '.ID')
         local private_ip=$(echo "$instance" | jq -r '.IP')
         local instance_name=$(echo "$instance" | jq -r '.Name // "Unnamed Instance"')
 
+        # Skip if instance ID is null or empty
+        if [ -z "$instance_id" ] || [ "$instance_id" == "null" ]; then
+            continue
+        fi
+
         echo "  Checking instance: $instance_name (ID: $instance_id, IP: $private_ip)"
 
-        # Fetch security group details
-        local sg_ids=$(aws ec2 describe-instances \
-            --instance-ids "$instance_id" \
-            --query "Reservations[0].Instances[0].SecurityGroups[*].GroupId" \
-            --output text)
-
-        echo "    Security Groups: $sg_ids"
-
-        for sg_id in $sg_ids; do
-            local open_ports=$(aws ec2 describe-security-groups \
-                --group-ids "$sg_id" \
-                --query "SecurityGroups[0].IpPermissions[*].FromPort" \
-                --output text | tr '\t' ',' )
-
-            echo "      Open Ports: $open_ports"
-
-            # Check for database ports
-            for port in "${DATABASE_PORTS[@]}"; do
-                # Use grep -qw to check if the port exists as a whole word in the list of open ports
-                if echo "$open_ports" | grep -qw "$port"; then
-                    echo "      Database port $port detected in Security Group $sg_id"
-                    # Optionally break here if finding one DB port is enough, or continue to list all found
-                fi
-            done
-        done
-
         # Optional: Check for running database processes via Systems Manager
-        if aws ssm describe-instance-information \
-            --query "InstanceInformationList[?InstanceId=='$instance_id']" \
-            --output text &>/dev/null; then
-            echo "    Instance is managed by Systems Manager. Checking for database processes..."
-            local command_id=$(aws ssm send-command \
-                --instance-ids "$instance_id" \
-                --document-name "AWS-RunShellScript" \
-                --comment "Check for running database processes" \
-                --parameters 'commands=["ps aux | grep -E \"postgres|mongo|mysql|mariadb|sqlserver\" | grep -v grep"]' \
-                --query "Command.CommandId" --output text)
-            check_error $? "Failed to send SSM command to instance $instance_id."
+        if [ "$SSM_MODE" == true ]; then
+            # Check if instance is managed by SSM first
+            if aws ssm describe-instance-information --query "InstanceInformationList[?InstanceId=='$instance_id']" --output text &>/dev/null; then
+                echo "    Instance is managed by Systems Manager. Checking for database processes..."
+                local command_id=$(aws ssm send-command \
+                    --instance-ids "$instance_id" \
+                    --document-name "AWS-RunShellScript" \
+                    --comment "Check for running database processes" \
+                    --parameters 'commands=["ps aux | grep -E \"postgres|mongo|mysql|mariadb|sqlserver\" | grep -v grep"]' \
+                    --query "Command.CommandId" --output text 2>/dev/null) # Suppress stderr on send-command too
+                local send_cmd_exit_code=$?
 
-            if [ -z "$command_id" ]; then
-                echo "    Warning: Failed to get Command ID for SSM check on $instance_id. Skipping process check."
-                continue # Skip to next instance
-            fi
-
-            echo "    SSM Command ID: $command_id. Waiting for completion..."
-            local ssm_status="Pending"
-            local ssm_output=""
-            local attempts=0
-            local max_attempts=12 # Wait for max 60 seconds (12 * 5s)
-
-            while [[ "$ssm_status" == "Pending" || "$ssm_status" == "InProgress" || "$ssm_status" == "Delayed" ]] && [ $attempts -lt $max_attempts ]; do
-                sleep 5
-                local invocation_details=$(aws ssm list-command-invocations --command-id "$command_id" --details --output json)
-                # Check if invocation details were retrieved
-                if [ -z "$invocation_details" ] || [ "$(echo "$invocation_details" | jq '.CommandInvocations | length')" -eq 0 ]; then
-                     echo "    Warning: Could not retrieve SSM invocation details for $command_id. Retrying..."
-                     attempts=$((attempts + 1))
-                     continue
+                if [ $send_cmd_exit_code -ne 0 ] || [ -z "$command_id" ]; then
+                    echo "    Warning: Failed to send SSM command to instance $instance_id. Skipping process check."
+                    continue # Skip to next instance
                 fi
-                ssm_status=$(echo "$invocation_details" | jq -r '.CommandInvocations[0].Status')
-                ssm_output=$(echo "$invocation_details" | jq -r '.CommandInvocations[0].CommandPlugins[0].Output // ""')
-                echo "    SSM Status: $ssm_status (Attempt: $((attempts + 1))/$max_attempts)"
-                attempts=$((attempts + 1))
-            done
 
-            if [ "$ssm_status" != "Success" ]; then
-                echo "    Warning: SSM command execution did not succeed (Status: $ssm_status). Skipping process check result."
-                local ssm_error_output=$(echo "$invocation_details" | jq -r '.CommandInvocations[0].CommandPlugins[0].StandardErrorContent // ""')
-                 if [ -n "$ssm_error_output" ]; then
-                    echo "    SSM Error Output: $ssm_error_output"
-                 fi
-            elif [[ -n "$ssm_output" ]]; then
-                echo "    Database processes detected:"
-                # Indent the output for clarity
-                echo "$ssm_output" | sed 's/^/    /'
-                echo "    Total EC2 DBs incremented"
-                ec2_db_count=$((ec2_db_count + 1))
+                echo "    SSM Command ID: $command_id. Waiting for completion..."
+                local ssm_status="Pending"
+                local ssm_output=""
+                local attempts=0
+                local max_attempts=12 # Wait for max 60 seconds (12 * 5s)
+
+                while [[ "$ssm_status" == "Pending" || "$ssm_status" == "InProgress" || "$ssm_status" == "Delayed" ]] && [ $attempts -lt $max_attempts ]; do
+                    sleep 5
+                    local invocation_details=$(aws ssm list-command-invocations --command-id "$command_id" --details --output json 2>/dev/null)
+                    # Check if invocation details were retrieved and not empty
+                    if [ -z "$invocation_details" ] || [ "$(echo "$invocation_details" | jq '.CommandInvocations | length')" -eq 0 ]; then
+                         echo "    Warning: Could not retrieve SSM invocation details for $command_id yet. Retrying..."
+                         attempts=$((attempts + 1))
+                         continue
+                    fi
+                    ssm_status=$(echo "$invocation_details" | jq -r '.CommandInvocations[0].Status // "Error"') # Default to Error if Status is missing
+                    ssm_output=$(echo "$invocation_details" | jq -r '.CommandInvocations[0].CommandPlugins[0].Output // ""')
+                    echo "    SSM Status: $ssm_status (Attempt: $((attempts + 1))/$max_attempts)"
+                    attempts=$((attempts + 1))
+                done
+
+                if [ "$ssm_status" != "Success" ]; then
+                    echo "    Warning: SSM command execution did not succeed (Status: $ssm_status). Skipping process check result."
+                    local ssm_error_output=$(echo "$invocation_details" | jq -r '.CommandInvocations[0].CommandPlugins[0].StandardErrorContent // ""')
+                     if [ -n "$ssm_error_output" ]; then
+                        echo "    SSM Error Output: $ssm_error_output"
+                     fi
+                elif [[ -n "$ssm_output" ]]; then
+                    echo "    Database processes detected:"
+                    # Indent the output for clarity
+                    echo "$ssm_output" | sed 's/^/    /'
+                    echo "    Total EC2 DBs incremented"
+                    ec2_db_count=$((ec2_db_count + 1))
+                else
+                    echo "    No database processes detected via SSM."
+                fi
             else
-                echo "    No database processes detected via SSM."
+                echo "    Instance is not managed by Systems Manager. Skipping process check."
             fi
-
         else
-            echo "    Instance is not managed by Systems Manager. Skipping process check."
-        fi
-    done
+             echo "    SSM mode not enabled (-c). Skipping process check."
+        fi # End SSM_MODE check
+    done <<< "$(echo "$instances_json" | jq -c '.[] | .[]')" # Feed jq output to the while loop correctly
 
-    echo "  Database scan complete."
-    echo "  EC2 DB instances: $ec2_db_count"
-    total_ec2_db=$((total_ec2_db + ec2_db_count))
-
-#__stopspin
+    echo "  Database scan complete for this account."
+    echo "  EC2 DB instances found in this account (via SSM): $ec2_db_count"
+    total_ec2_db=$((total_ec2_db + ec2_db_count)) # Add to global total
 }
 
 # Function to count resources in a single account
 count_resources() {
-#    __startspin
-    
     local account_id=$1
+    local current_region=$2 # Pass region if specified
+
+    echo "--------------------------------------------------"
+    echo "Processing Account: $account_id"
+    if [ -n "$current_region" ]; then
+        echo "Region specified: $current_region"
+    fi
+    echo "--------------------------------------------------"
+
 
     if [ "$ORG_MODE" == true ]; then
-        # Assume role in the account (replace "OrganizationAccountAccessRole" with your role name if different)
-        # Capture stderr to prevent it from cluttering the output if it fails
+        # Assume role in the account
+        echo "  Attempting to assume role '$ROLE' in account $account_id..."
         creds=$(aws sts assume-role --role-arn "arn:aws:iam::$account_id:role/$ROLE" \
             --role-session-name "OrgSession" --query "Credentials" --output json 2> /dev/null)
         local assume_role_exit_code=$?
 
         if [ $assume_role_exit_code -ne 0 ]; then
             echo "  Warning: Unable to assume role '$ROLE' in account $account_id (Exit Code: $assume_role_exit_code). Skipping account..."
-            # No need to unset creds as they weren't successfully set
             return
         fi
-
-        # Double check creds are not empty even if command succeeded
-        if [ -z "$creds" ]; then
-             echo "  Warning: Assumed role in account $account_id but credentials seem empty. Skipping account..."
+        if [ -z "$creds" ] || [ "$creds" == "null" ]; then
+             echo "  Warning: Assumed role in account $account_id but credentials seem empty or null. Skipping account..."
              return
         fi
 
         # Export temporary credentials
-        export AWS_ACCESS_KEY_ID=$(echo $creds | jq -r ".AccessKeyId")
-        export AWS_SECRET_ACCESS_KEY=$(echo $creds | jq -r ".SecretAccessKey")
-        export AWS_SESSION_TOKEN=$(echo $creds | jq -r ".SessionToken")
+        export AWS_ACCESS_KEY_ID=$(echo "$creds" | jq -r ".AccessKeyId")
+        export AWS_SECRET_ACCESS_KEY=$(echo "$creds" | jq -r ".SecretAccessKey")
+        export AWS_SESSION_TOKEN=$(echo "$creds" | jq -r ".SessionToken")
+
+        # Verify assumed identity
+        assumed_identity=$(aws sts get-caller-identity --query Arn --output text 2>/dev/null)
+        if [ $? -ne 0 ] || [[ ! "$assumed_identity" =~ "$account_id" ]]; then
+            echo "  Warning: Failed to verify assumed role identity for account $account_id. Skipping account."
+            unset AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN
+            return
+        fi
+        echo "  Successfully assumed role in account $account_id."
     fi
 
 
     if [ "$DSPM_MODE" == false ]; then
         echo "Counting Cloud Security resources in account: $account_id"
-       
+        local account_ec2_count=0
+        local account_eks_nodes=0
+        local account_eks_clusters=0
+        local account_ecs_clusters=0 # Added
+        local account_ecs_tasks=0    # Added
+        local account_docker_hosts=0
+        local docker_host_tag_key="DockerHost" # Define tag key here
+
         # Count EC2 instances
-        if [[ "${REGION}" ]]; then
-            ec2_count=$(aws ec2 describe-instances --region $REGION --filters "Name=instance-state-name,Values=$STATE" --query "Reservations[*].Instances[*]" --output json | jq 'length')
-            check_error $? "Failed to describe EC2 instances in region $REGION for account $account_id."
+        echo "  Counting EC2 instances..."
+        if [[ -n "${current_region}" ]]; then
+            count_in_region=$(aws ec2 describe-instances --region "$current_region" --filters "Name=instance-state-name,Values=$STATE" --query "Reservations[*].Instances[*]" --output json 2>/dev/null | jq 'length')
+            if [ $? -eq 0 ] && [[ "$count_in_region" =~ ^[0-9]+$ ]]; then
+                if [ "$count_in_region" -gt 0 ]; then echo "    Region $current_region: $count_in_region instances"; fi
+                account_ec2_count=$((account_ec2_count + count_in_region))
+            else
+                 echo "    Warning: Failed to count EC2 in region $current_region."
+            fi
         else
-            echo "  Counting EC2 instances across all accessible regions..."
-            ec2_count=0
-            # Use the activeRegions variable fetched earlier
+            echo "    Across all accessible regions..."
             for r in $activeRegions; do
-                # Capture stderr to avoid cluttering output for regions where API might not be enabled/accessible
                 count_in_region=$(aws ec2 describe-instances --region "$r" --filters "Name=instance-state-name,Values=$STATE" --query "Reservations[*].Instances[*]" --output json 2>/dev/null | jq 'length')
                 if [ $? -eq 0 ] && [[ "$count_in_region" =~ ^[0-9]+$ ]]; then
-                    # Only print if count > 0 to reduce noise
-                    if [ "$count_in_region" -gt 0 ]; then
-                       echo "    Region $r: $count_in_region instances"
-                    fi
-                    ec2_count=$((ec2_count + count_in_region))
+                    if [ "$count_in_region" -gt 0 ]; then echo "      Region $r: $count_in_region instances"; fi
+                    account_ec2_count=$((account_ec2_count + count_in_region))
+                # else echo "      Skipping region $r (no access or error)" # Optional: more verbose logging
                 fi
             done
         fi
-        echo "  EC2 instances: $ec2_count"
-        total_ec2_instances=$((total_ec2_instances + ec2_count))
+        echo "  EC2 instances in account: $account_ec2_count"
+        total_ec2_instances=$((total_ec2_instances + account_ec2_count))
 
-        # Count EKS nodes
-        if [[ "${REGION}" ]]; then
-            clusters=$(aws eks list-clusters --region $REGION --query "clusters" --output text)
-            check_error $? "Failed to list EKS clusters in region $REGION for account $account_id."
+        # Count EKS Clusters and Nodes
+        echo "  Counting EKS clusters and nodes..."
+        local eks_clusters=""
+        local list_eks_clusters_exit_code=0
+        local eks_cluster_map_file=""
+        if [[ -z "${current_region}" ]]; then
+            eks_cluster_map_file=$(mktemp)
+        fi
+
+        if [[ -n "${current_region}" ]]; then
+            eks_clusters=$(aws eks list-clusters --region "$current_region" --query "clusters" --output text 2>/dev/null)
+            list_eks_clusters_exit_code=$?
         else
-            clusters=$(aws eks list-clusters --query "clusters" --output text)
-            check_error $? "Failed to list EKS clusters (all regions) for account $account_id."
-        fi        
-        for cluster in $clusters; do
-            node_groups=$(aws eks list-nodegroups --cluster-name "$cluster" --query 'nodegroups' --output text)
-            # If listing nodegroups fails, log warning and skip this cluster
-            if [ $? -ne 0 ]; then
-                echo "    Warning: Failed to list nodegroups for EKS cluster '$cluster' in account $account_id. Skipping cluster."
-                continue
+             echo "    Across all accessible regions..."
+             eks_cluster_list_all_regions=""
+             for r in $activeRegions; do
+                 clusters_in_region=$(aws eks list-clusters --region "$r" --query "clusters" --output text 2>/dev/null)
+                 if [ $? -eq 0 ] && [ -n "$clusters_in_region" ]; then
+                     if [ -n "$eks_cluster_list_all_regions" ]; then
+                         eks_cluster_list_all_regions="$eks_cluster_list_all_regions $clusters_in_region"
+                     else
+                         eks_cluster_list_all_regions="$clusters_in_region"
+                     fi
+                     # Use process substitution to avoid subshell issues with the map file
+                     while IFS= read -r cl; do echo "$r $cl"; done <<< "$clusters_in_region" >> "$eks_cluster_map_file"
+                 fi
+             done
+             eks_clusters=$eks_cluster_list_all_regions
+             list_eks_clusters_exit_code=0
+        fi
+
+        if [ $list_eks_clusters_exit_code -ne 0 ] && [ -z "$eks_clusters" ]; then
+            echo "    Warning: Failed to list EKS clusters for account $account_id. Skipping EKS counts."
+        else
+            # Count EKS Clusters found
+            if [ -n "$eks_clusters" ]; then
+                account_eks_clusters=$(echo "$eks_clusters" | wc -w)
+            else
+                account_eks_clusters=0
             fi
-            total_nodes=0
-            for node_group in $node_groups; do
-                node_count=$(aws eks describe-nodegroup --cluster-name "$cluster" --nodegroup-name "$node_group" --query "nodegroup.scalingConfig.desiredSize" --output text)
-                # If describing nodegroup fails, log warning and skip this nodegroup
-                if [ $? -ne 0 ]; then
-                    echo "    Warning: Failed to describe nodegroup '$node_group' for cluster '$cluster' in account $account_id. Skipping nodegroup."
-                    continue
-                fi
-                total_nodes=$((total_nodes + node_count))
-                echo "  EKS cluster '$cluster' nodegroup $node_group nodes: $node_count"
-                total_eks_nodes=$((total_eks_nodes + node_count))
+            echo "    EKS clusters found in account: $account_eks_clusters"
+            total_eks_clusters=$((total_eks_clusters + account_eks_clusters))
+
+            # Count EKS Nodes
+            account_eks_nodes=0 # Reset node count for this account
+            if [[ -n "${current_region}" ]]; then
+                 # Single region processing
+                 for cluster in $eks_clusters; do
+                     echo "    Processing EKS cluster '$cluster' in region '$current_region'..."
+                     node_groups=$(aws eks list-nodegroups --region "$current_region" --cluster-name "$cluster" --query 'nodegroups' --output text 2>/dev/null)
+                     list_nodegroups_exit_code=$?
+                     if [ $list_nodegroups_exit_code -ne 0 ] || [ -z "$node_groups" ]; then
+                         echo "      Warning: Failed to list nodegroups for EKS cluster '$cluster' in region $current_region. Skipping cluster nodes."
+                         continue
+                     fi
+                     for node_group in $node_groups; do
+                         node_count=$(aws eks describe-nodegroup --region "$current_region" --cluster-name "$cluster" --nodegroup-name "$node_group" --query "nodegroup.scalingConfig.desiredSize" --output text 2>/dev/null)
+                         if [ $? -eq 0 ] && [[ "$node_count" =~ ^[0-9]+$ ]]; then
+                             echo "      EKS Cluster '$cluster' nodegroup '$node_group' nodes: $node_count"
+                             account_eks_nodes=$((account_eks_nodes + node_count))
+                         else
+                             echo "      Warning: Failed to get node count for nodegroup '$node_group' in cluster '$cluster'."
+                         fi
+                     done
+                 done
+            elif [ -f "$eks_cluster_map_file" ]; then
+                 # All regions processing using the map file
+                 while IFS=' ' read -r cluster_region cluster_name; do
+                     if [ -z "$cluster_region" ] || [ -z "$cluster_name" ]; then continue; fi
+                     echo "    Processing EKS cluster '$cluster_name' in region '$cluster_region'..."
+                     node_groups=$(aws eks list-nodegroups --region "$cluster_region" --cluster-name "$cluster_name" --query 'nodegroups' --output text 2>/dev/null)
+                     list_nodegroups_exit_code=$?
+                     if [ $list_nodegroups_exit_code -ne 0 ] || [ -z "$node_groups" ]; then
+                         echo "      Warning: Failed to list nodegroups for EKS cluster '$cluster_name' in region $cluster_region. Skipping cluster nodes."
+                         continue
+                     fi
+                     for node_group in $node_groups; do
+                         node_count=$(aws eks describe-nodegroup --region "$cluster_region" --cluster-name "$cluster_name" --nodegroup-name "$node_group" --query "nodegroup.scalingConfig.desiredSize" --output text 2>/dev/null)
+                         if [ $? -eq 0 ] && [[ "$node_count" =~ ^[0-9]+$ ]]; then
+                             echo "      EKS Cluster '$cluster_name' nodegroup '$node_group' nodes: $node_count"
+                             account_eks_nodes=$((account_eks_nodes + node_count))
+                         else
+                             echo "      Warning: Failed to get node count for nodegroup '$node_group' in cluster '$cluster_name'."
+                         fi
+                     done
+                 done < "$eks_cluster_map_file"
+            fi
+            echo "    EKS nodes found in account: $account_eks_nodes"
+            total_eks_nodes=$((total_eks_nodes + account_eks_nodes))
+        fi
+        if [ -f "$eks_cluster_map_file" ]; then
+            rm "$eks_cluster_map_file"
+        fi
+
+        # Count ECS Clusters and Tasks
+        echo "  Counting ECS clusters and tasks..."
+        local ecs_clusters=""
+        local list_ecs_clusters_exit_code=0
+        local ecs_cluster_map_file=""
+         if [[ -z "${current_region}" ]]; then
+            ecs_cluster_map_file=$(mktemp)
+        fi
+
+        if [[ -n "${current_region}" ]]; then
+            ecs_clusters=$(aws ecs list-clusters --region "$current_region" --query "clusterArns" --output text 2>/dev/null)
+            list_ecs_clusters_exit_code=$?
+        else
+            echo "    Across all accessible regions..."
+            ecs_cluster_list_all_regions=""
+            for r in $activeRegions; do
+                clusters_in_region=$(aws ecs list-clusters --region "$r" --query "clusterArns" --output text 2>/dev/null)
+                 if [ $? -eq 0 ] && [ -n "$clusters_in_region" ]; then
+                     if [ -n "$ecs_cluster_list_all_regions" ]; then
+                         ecs_cluster_list_all_regions="$ecs_cluster_list_all_regions $clusters_in_region"
+                     else
+                         ecs_cluster_list_all_regions="$clusters_in_region"
+                     fi
+                     # Use process substitution to avoid subshell issues with the map file
+                     while IFS= read -r cl_arn; do echo "$r $cl_arn"; done <<< "$clusters_in_region" >> "$ecs_cluster_map_file"
+                 fi
             done
-        done
-    fi
+            ecs_clusters=$ecs_cluster_list_all_regions
+            list_ecs_clusters_exit_code=0
+        fi
+
+        if [ $list_ecs_clusters_exit_code -ne 0 ] && [ -z "$ecs_clusters" ]; then
+             echo "    Warning: Failed to list ECS clusters for account $account_id. Skipping ECS counts."
+        else
+            # Count ECS Clusters found
+            if [ -n "$ecs_clusters" ]; then
+                account_ecs_clusters=$(echo "$ecs_clusters" | wc -w)
+            else
+                account_ecs_clusters=0
+            fi
+            echo "    ECS clusters found in account: $account_ecs_clusters"
+            total_ecs_clusters=$((total_ecs_clusters + account_ecs_clusters))
+
+            # Count ECS Tasks
+            account_ecs_tasks=0 # Reset task count for this account
+            process_ecs_cluster() {
+                local cluster_region=$1
+                local cluster_arn=$2
+                local cluster_name # Extract name later if needed, use ARN for commands
+
+                # Ensure cluster_region and cluster_arn are not empty
+                if [ -z "$cluster_region" ] || [ -z "$cluster_arn" ]; then return; fi
+
+                cluster_name=$(basename "$cluster_arn") # Extract name from ARN for logging
+                echo "    Processing ECS cluster '$cluster_name' in region '$cluster_region'..."
+                local services_output
+                local next_token=""
+                local services_in_cluster=() # Array to hold all service ARNs
+
+                # Paginate through list-services
+                while true; do
+                    if [ -z "$next_token" ] || [ "$next_token" == "null" ]; then
+                        services_output=$(aws ecs list-services --region "$cluster_region" --cluster "$cluster_arn" --output json 2>/dev/null)
+                    else
+                        services_output=$(aws ecs list-services --region "$cluster_region" --cluster "$cluster_arn" --starting-token "$next_token" --output json 2>/dev/null)
+                    fi
+
+                    if [ $? -ne 0 ]; then
+                        echo "      Warning: Failed to list services for ECS cluster '$cluster_name' in region $cluster_region. Skipping task count for this cluster."
+                        return # Exit function for this cluster
+                    fi
+
+                    # Safely extract service ARNs using jq
+                    current_services_json=$(echo "$services_output" | jq -c '.serviceArns // []')
+                    readarray -t current_services < <(jq -r '.[]' <<< "$current_services_json")
+
+                    if [ ${#current_services[@]} -gt 0 ]; then
+                        services_in_cluster+=("${current_services[@]}")
+                    fi
+
+                    next_token=$(echo "$services_output" | jq -r '.nextToken // empty')
+                    if [ -z "$next_token" ]; then
+                        break # No more pages
+                    fi
+                done
+
+                if [ ${#services_in_cluster[@]} -eq 0 ]; then
+                    echo "      No active services found in cluster '$cluster_name'."
+                    return
+                fi
+
+                # Describe services in batches of 10
+                local i=0
+                while [ $i -lt ${#services_in_cluster[@]} ]; do
+                    # Prepare batch carefully, quoting each ARN
+                    local batch_args=()
+                    for j in $(seq $i $((i + 9))); do
+                        if [ $j -lt ${#services_in_cluster[@]} ]; then
+                            batch_args+=("${services_in_cluster[j]}")
+                        fi
+                    done
+
+                    if [ ${#batch_args[@]} -eq 0 ]; then break; fi # Should not happen, but safety check
+
+                    local describe_output
+                    # Pass batch arguments correctly to --services
+                    describe_output=$(aws ecs describe-services --region "$cluster_region" --cluster "$cluster_arn" --services "${batch_args[@]}" --query "services[*].runningCount" --output json 2>/dev/null)
+
+
+                    if [ $? -eq 0 ] && [ -n "$describe_output" ] && [ "$describe_output" != "null" ]; then
+                        # Sum runningCount from the batch using jq
+                        local batch_task_count=$(echo "$describe_output" | jq '[.[]] | add // 0')
+                        if [[ "$batch_task_count" =~ ^[0-9]+$ ]]; then
+                             account_ecs_tasks=$((account_ecs_tasks + batch_task_count))
+                        fi
+                    else
+                        echo "      Warning: Failed to describe some services in batch starting at index $i for cluster '$cluster_name'."
+                    fi
+                    i=$((i + 10))
+                done
+            }
+
+            if [[ -n "${current_region}" ]]; then
+                 for cluster_arn in $ecs_clusters; do
+                     process_ecs_cluster "$current_region" "$cluster_arn"
+                 done
+            elif [ -f "$ecs_cluster_map_file" ]; then
+                 while IFS=' ' read -r cluster_region cluster_arn; do
+                     process_ecs_cluster "$cluster_region" "$cluster_arn"
+                 done < "$ecs_cluster_map_file"
+            fi
+            echo "    ECS running tasks found in account: $account_ecs_tasks"
+            total_ecs_tasks=$((total_ecs_tasks + account_ecs_tasks))
+        fi
+         if [ -f "$ecs_cluster_map_file" ]; then
+            rm "$ecs_cluster_map_file"
+        fi
+
+        # Count EC2 instances tagged as Docker Hosts
+        echo "  Counting EC2 instances tagged as Docker Hosts (Tag Key: $docker_host_tag_key)..."
+        if [[ -n "${current_region}" ]]; then
+            count_in_region=$(aws ec2 describe-instances --region "$current_region" --filters "Name=instance-state-name,Values=$STATE" "Name=tag-key,Values=$docker_host_tag_key" --query "Reservations[*].Instances[*]" --output json 2>/dev/null | jq 'length')
+            if [ $? -eq 0 ] && [[ "$count_in_region" =~ ^[0-9]+$ ]]; then
+                if [ "$count_in_region" -gt 0 ]; then echo "    Region $current_region: $count_in_region Docker Hosts"; fi
+                account_docker_hosts=$((account_docker_hosts + count_in_region))
+            else
+                 echo "    Warning: Failed to count Docker Hosts in region $current_region."
+            fi
+        else
+            echo "    Across all accessible regions..."
+            for r in $activeRegions; do
+                count_in_region=$(aws ec2 describe-instances --region "$r" --filters "Name=instance-state-name,Values=$STATE" "Name=tag-key,Values=$docker_host_tag_key" --query "Reservations[*].Instances[*]" --output json 2>/dev/null | jq 'length')
+                if [ $? -eq 0 ] && [[ "$count_in_region" =~ ^[0-9]+$ ]]; then
+                    if [ "$count_in_region" -gt 0 ]; then echo "      Region $r: $count_in_region Docker Hosts"; fi
+                    account_docker_hosts=$((account_docker_hosts + count_in_region))
+                # else echo "      Skipping region $r (no access or error)" # Optional
+                fi
+            done
+        fi
+        echo "  EC2 Docker Hosts found in account (tagged '$docker_host_tag_key'): $account_docker_hosts"
+        total_docker_hosts=$((total_docker_hosts + account_docker_hosts))
+
+    fi # End of non-DSPM mode block
 
     if [ "$DSPM_MODE" == true ]; then
         echo "Counting DSPM Security resources in account: $account_id"
-        # Count S3 buckets
-        if [[ "${REGION}" ]]; then
-            s3_count=$(aws s3api list-buckets --region $REGION --query "Buckets[*].Name" --output text | wc -w)
-            check_error $? "Failed to list S3 buckets in region $REGION for account $account_id."
+        local account_s3_count=0
+        local account_efs_count=0
+        local account_aurora_count=0
+        local account_rds_count=0
+        local account_dynamodb_count=0
+        local account_redshift_count=0
+
+        # Count S3 buckets (Global service, no region loop needed)
+        echo "  Counting S3 buckets..."
+        s3_count=$(aws s3api list-buckets --query "Buckets[*].Name" --output text 2>/dev/null | wc -w)
+        if [ $? -eq 0 ] && [[ "$s3_count" =~ ^[0-9]+$ ]]; then
+            account_s3_count=$s3_count
         else
-            s3_count=$(aws s3api list-buckets --query "Buckets[*].Name" --output text | wc -w)
-            check_error $? "Failed to list S3 buckets (all regions) for account $account_id."
-        fi   
-        echo "  S3 buckets: $s3_count"
-        total_s3_buckets=$((total_s3_buckets + s3_count))
+            echo "    Warning: Failed to list S3 buckets."
+            account_s3_count=0
+        fi
+        echo "  S3 buckets in account: $account_s3_count"
+        total_s3_buckets=$((total_s3_buckets + account_s3_count))
 
         # Count EFS file systems
-        if [[ "${REGION}" ]]; then
-            efs_count=$(aws efs describe-file-systems --region $REGION --query "FileSystems[*].FileSystemId" --output text | wc -w)
-            check_error $? "Failed to describe EFS file systems in region $REGION for account $account_id."
+        echo "  Counting EFS file systems..."
+        if [[ -n "${current_region}" ]]; then
+             count_in_region=$(aws efs describe-file-systems --region "$current_region" --query "FileSystems[*].FileSystemId" --output text 2>/dev/null | wc -w)
+             if [ $? -eq 0 ] && [[ "$count_in_region" =~ ^[0-9]+$ ]]; then
+                 if [ "$count_in_region" -gt 0 ]; then echo "    Region $current_region: $count_in_region EFS"; fi
+                 account_efs_count=$((account_efs_count + count_in_region))
+             else echo "    Warning: Failed to count EFS in region $current_region."; fi
         else
-            efs_count=$(aws efs describe-file-systems --query "FileSystems[*].FileSystemId" --output text | wc -w)
-            check_error $? "Failed to describe EFS file systems (all regions) for account $account_id."
-        fi  
-        echo "  EFS file systems: $efs_count"
-        total_efs=$((total_efs + efs_count))
+             echo "    Across all accessible regions..."
+             for r in $activeRegions; do
+                 count_in_region=$(aws efs describe-file-systems --region "$r" --query "FileSystems[*].FileSystemId" --output text 2>/dev/null | wc -w)
+                 if [ $? -eq 0 ] && [[ "$count_in_region" =~ ^[0-9]+$ ]]; then
+                     if [ "$count_in_region" -gt 0 ]; then echo "      Region $r: $count_in_region EFS"; fi
+                     account_efs_count=$((account_efs_count + count_in_region))
+                 fi
+             done
+        fi
+        echo "  EFS file systems in account: $account_efs_count"
+        total_efs=$((total_efs + account_efs_count))
 
         # Count Aurora clusters
-        if [[ "${REGION}" ]]; then
-            aurora_count=$(aws rds describe-db-clusters --region $REGION --query "DBClusters[?Engine=='aurora'].DBClusterIdentifier" --output text | wc -w)
-            check_error $? "Failed to describe Aurora clusters in region $REGION for account $account_id."
+        echo "  Counting Aurora clusters..."
+         if [[ -n "${current_region}" ]]; then
+             count_in_region=$(aws rds describe-db-clusters --region "$current_region" --query "DBClusters[?Engine=='aurora' || Engine=='aurora-mysql' || Engine=='aurora-postgresql'].DBClusterIdentifier" --output text 2>/dev/null | wc -w)
+             if [ $? -eq 0 ] && [[ "$count_in_region" =~ ^[0-9]+$ ]]; then
+                 if [ "$count_in_region" -gt 0 ]; then echo "    Region $current_region: $count_in_region Aurora"; fi
+                 account_aurora_count=$((account_aurora_count + count_in_region))
+             else echo "    Warning: Failed to count Aurora in region $current_region."; fi
         else
-            aurora_count=$(aws rds describe-db-clusters --query "DBClusters[?Engine=='aurora'].DBClusterIdentifier" --output text | wc -w)
-            check_error $? "Failed to describe Aurora clusters (all regions) for account $account_id."
-        fi         
-        echo "  Aurora clusters: $aurora_count"
-        total_aurora=$((total_aurora + aurora_count))
+             echo "    Across all accessible regions..."
+             for r in $activeRegions; do
+                 count_in_region=$(aws rds describe-db-clusters --region "$r" --query "DBClusters[?Engine=='aurora' || Engine=='aurora-mysql' || Engine=='aurora-postgresql'].DBClusterIdentifier" --output text 2>/dev/null | wc -w)
+                 if [ $? -eq 0 ] && [[ "$count_in_region" =~ ^[0-9]+$ ]]; then
+                     if [ "$count_in_region" -gt 0 ]; then echo "      Region $r: $count_in_region Aurora"; fi
+                     account_aurora_count=$((account_aurora_count + count_in_region))
+                 fi
+             done
+        fi
+        echo "  Aurora clusters in account: $account_aurora_count"
+        total_aurora=$((total_aurora + account_aurora_count))
 
-        # Count RDS instances
-        if [[ "${REGION}" ]]; then
-            rds_count=$(aws rds describe-db-instances --region $REGION --query "DBInstances[?Engine=='mysql' || Engine=='mariadb' || Engine=='postgres'].DBInstanceIdentifier" --output text | wc -w)
-            check_error $? "Failed to describe RDS instances in region $REGION for account $account_id."
+        # Count RDS instances (non-Aurora MySQL, MariaDB, PostgreSQL)
+        echo "  Counting RDS instances (non-Aurora)..."
+        if [[ -n "${current_region}" ]]; then
+             count_in_region=$(aws rds describe-db-instances --region "$current_region" --query "DBInstances[?!contains(Engine, 'aurora') && (Engine=='mysql' || Engine=='mariadb' || Engine=='postgres')].DBInstanceIdentifier" --output text 2>/dev/null | wc -w)
+             if [ $? -eq 0 ] && [[ "$count_in_region" =~ ^[0-9]+$ ]]; then
+                  if [ "$count_in_region" -gt 0 ]; then echo "    Region $current_region: $count_in_region RDS"; fi
+                  account_rds_count=$((account_rds_count + count_in_region))
+             else echo "    Warning: Failed to count RDS in region $current_region."; fi
         else
-            rds_count=$(aws rds describe-db-instances --query "DBInstances[?Engine=='mysql' || Engine=='mariadb' || Engine=='postgres'].DBInstanceIdentifier" --output text | wc -w)
-            check_error $? "Failed to describe RDS instances (all regions) for account $account_id."
-        fi   
-        echo "  RDS instances (MySQL, MariaDB, PostgreSQL): $rds_count"
-        total_rds=$((total_rds + rds_count))
+             echo "    Across all accessible regions..."
+             for r in $activeRegions; do
+                 count_in_region=$(aws rds describe-db-instances --region "$r" --query "DBInstances[?!contains(Engine, 'aurora') && (Engine=='mysql' || Engine=='mariadb' || Engine=='postgres')].DBInstanceIdentifier" --output text 2>/dev/null | wc -w)
+                 if [ $? -eq 0 ] && [[ "$count_in_region" =~ ^[0-9]+$ ]]; then
+                     if [ "$count_in_region" -gt 0 ]; then echo "      Region $r: $count_in_region RDS"; fi
+                     account_rds_count=$((account_rds_count + count_in_region))
+                 fi
+             done
+        fi
+        echo "  RDS instances (non-Aurora) in account: $account_rds_count"
+        total_rds=$((total_rds + account_rds_count))
 
         # Count DynamoDB tables
-        if [[ "${REGION}" ]]; then
-            dynamodb_count=$(aws dynamodb list-tables --region $REGION --query "TableNames" --output text | wc -w)
-            check_error $? "Failed to list DynamoDB tables in region $REGION for account $account_id."
+        echo "  Counting DynamoDB tables..."
+         if [[ -n "${current_region}" ]]; then
+             count_in_region=$(aws dynamodb list-tables --region "$current_region" --query "TableNames" --output text 2>/dev/null | wc -w)
+              if [ $? -eq 0 ] && [[ "$count_in_region" =~ ^[0-9]+$ ]]; then
+                  if [ "$count_in_region" -gt 0 ]; then echo "    Region $current_region: $count_in_region DynamoDB"; fi
+                  account_dynamodb_count=$((account_dynamodb_count + count_in_region))
+             else echo "    Warning: Failed to count DynamoDB in region $current_region."; fi
         else
-            dynamodb_count=$(aws dynamodb list-tables --query "TableNames" --output text | wc -w)
-            check_error $? "Failed to list DynamoDB tables (all regions) for account $account_id."
-        fi 
-        echo "  DynamoDB tables: $dynamodb_count"
-        total_dynamodb=$((total_dynamodb + dynamodb_count))
+             echo "    Across all accessible regions..."
+             for r in $activeRegions; do
+                 count_in_region=$(aws dynamodb list-tables --region "$r" --query "TableNames" --output text 2>/dev/null | wc -w)
+                 if [ $? -eq 0 ] && [[ "$count_in_region" =~ ^[0-9]+$ ]]; then
+                     if [ "$count_in_region" -gt 0 ]; then echo "      Region $r: $count_in_region DynamoDB"; fi
+                     account_dynamodb_count=$((account_dynamodb_count + count_in_region))
+                 fi
+             done
+        fi
+        echo "  DynamoDB tables in account: $account_dynamodb_count"
+        total_dynamodb=$((total_dynamodb + account_dynamodb_count))
 
         # Count Redshift clusters
-        if [[ "${REGION}" ]]; then
-            redshift_count=$(aws redshift describe-clusters --region $REGION --query "Clusters[*].ClusterIdentifier" --output text | wc -w)
-            check_error $? "Failed to describe Redshift clusters in region $REGION for account $account_id."
+        echo "  Counting Redshift clusters..."
+        if [[ -n "${current_region}" ]]; then
+             count_in_region=$(aws redshift describe-clusters --region "$current_region" --query "Clusters[*].ClusterIdentifier" --output text 2>/dev/null | wc -w)
+             if [ $? -eq 0 ] && [[ "$count_in_region" =~ ^[0-9]+$ ]]; then
+                  if [ "$count_in_region" -gt 0 ]; then echo "    Region $current_region: $count_in_region Redshift"; fi
+                  account_redshift_count=$((account_redshift_count + count_in_region))
+             else echo "    Warning: Failed to count Redshift in region $current_region."; fi
         else
-            redshift_count=$(aws redshift describe-clusters --query "Clusters[*].ClusterIdentifier" --output text | wc -w)
-            check_error $? "Failed to describe Redshift clusters (all regions) for account $account_id."
-        fi 
-        echo "  Redshift clusters: $redshift_count"
-        total_redshift=$((total_redshift + redshift_count))
- 
-   	if [ "$SSM_MODE" == true ]; then
-    	check_running_databases
-    	fi
-    
-    fi
+             echo "    Across all accessible regions..."
+             for r in $activeRegions; do
+                 count_in_region=$(aws redshift describe-clusters --region "$r" --query "Clusters[*].ClusterIdentifier" --output text 2>/dev/null | wc -w)
+                 if [ $? -eq 0 ] && [[ "$count_in_region" =~ ^[0-9]+$ ]]; then
+                     if [ "$count_in_region" -gt 0 ]; then echo "      Region $r: $count_in_region Redshift"; fi
+                     account_redshift_count=$((account_redshift_count + count_in_region))
+                 fi
+             done
+        fi
+        echo "  Redshift clusters in account: $account_redshift_count"
+        total_redshift=$((total_redshift + account_redshift_count))
+
+        # Count EC2 DBs (only if SSM mode is enabled)
+        if [ "$SSM_MODE" == true ]; then
+            check_running_databases # This function updates total_ec2_db
+        else
+            echo "  Skipping EC2 DB check (SSM mode not enabled with -c flag)."
+        fi
+
+    fi # End DSPM_MODE check
 
     # Unset temporary credentials only if they were successfully set
     if [ "$ORG_MODE" == true ] && [ -n "$AWS_SESSION_TOKEN" ]; then
         # Unset temporary credentials
         unset AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN
+        echo "  Unset temporary credentials for account $account_id."
     fi
 
-#    __stopspin
 }
 
 # Main logic
 if [ "$ORG_MODE" == true ]; then
     # Get the list of all accounts in the AWS Organization
-    # Filter for ACTIVE accounts only
+    echo "Fetching accounts from AWS Organization..."
     accounts=$(aws organizations list-accounts --query "Accounts[?Status=='ACTIVE'].Id" --output text)
     check_error $? "Failed to list accounts in the organization. Ensure you have 'organizations:ListAccounts' permission."
 
     if [ -z "$accounts" ]; then
-        echo "No accounts found in the organization."
+        echo "No active accounts found in the organization."
         exit 0
     fi
+    echo "Found accounts: $accounts"
 
     # Loop through each account in the organization
     for account_id in $accounts; do
-        count_resources "$account_id"
+        count_resources "$account_id" "$REGION" # Pass region if specified
     done
 else
     # Run for the standalone account
     current_account=$(aws sts get-caller-identity --query "Account" --output text)
     check_error $? "Failed to get caller identity for the current account."
-    count_resources "$current_account"
+    count_resources "$current_account" "$REGION" # Pass region if specified
 fi
 
-if [ "$ORG_MODE" == true ] && [ "$DSPM_MODE" == false ]; then
+# Define docker_host_tag_key again for the summary section consistency
+docker_host_tag_key="DockerHost"
+
+# Final Summary Section
+echo ""
+echo "##########################################"
+echo "** FINAL SUMMARY (Across all processed accounts) **"
+echo "##########################################"
+echo ""
+
+if [ "$DSPM_MODE" == false ]; then
+    echo "** Cloud Security Counts **"
+    echo "==============================="
+    echo "EC2 instances ($STATE): $total_ec2_instances"
+    echo "EKS nodes (desired):    $total_eks_nodes"
+    echo "EKS clusters:           $total_eks_clusters"
+    echo "ECS tasks (running):    $total_ecs_tasks"     # Added
+    echo "ECS clusters:           $total_ecs_clusters"    # Added
+    echo "EC2 Docker Hosts (tagged '$docker_host_tag_key', $STATE): $total_docker_hosts"
     echo ""
-    echo "** TOTAL COUNTS **"
-    echo "  EC2 instances: $total_ec2_instances"
-    echo "  EKS nodes: $total_eks_nodes"
 fi
 
-if [ "$ORG_MODE" == true ] && [ "$DSPM_MODE" == true ]; then
+if [ "$DSPM_MODE" == true ]; then
+    echo "** DSPM Counts **"
+    echo "==============================="
+    echo "S3 buckets:             $total_s3_buckets"
+    echo "EFS file systems:       $total_efs"
+    echo "Aurora clusters:        $total_aurora"
+    echo "RDS instances:          $total_rds"
+    echo "DynamoDB tables:        $total_dynamodb"
+    echo "Redshift clusters:      $total_redshift"
+    if [ "$SSM_MODE" == true ]; then
+       echo "EC2 DBs (via SSM):      $total_ec2_db"
+    else
+       echo "EC2 DBs (via SSM):      (Skipped, use -c flag to enable)"
+    fi
     echo ""
-    echo "** TOTAL DSPM COUNTS **"
-    echo "  S3 buckets: $total_s3_buckets"
-    echo "  EFS file systems: $total_efs"
-    echo "  Aurora clusters: $total_aurora"
-    echo "  RDS instances: $total_rds"
-    echo "  DynamoDB tables: $total_dynamodb"
-    echo "  Redshift clusters: $total_redshift"
-    echo "  EC2 DBs: $total_ec2_db"
 fi
+
+echo "Script finished."
