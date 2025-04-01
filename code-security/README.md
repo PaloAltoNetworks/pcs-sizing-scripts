@@ -1,7 +1,7 @@
 # Count IaC resources with Checkov
 
 ## Prerequisites
-1. [Install](https://github.com/bridgecrewio/checkov/blob/master/docs/2.Basics/Installing%20Checkov.md) / update checkov to version 2.0.427 or later (use `checkov -v` to check the version).
+1. [Install](https://github.com/bridgecrewio/checkov/blob/master/docs/2.Basics/Installing%20Checkov.md) / update checkov to version 3.0.0 or later (use `checkov -v` to check the version).
 2. Optional (recommended): Install _jq_
 3. Clone the repo(s) to be counted.
 4. From the root of each repo that you plan to scan with Bridgecrew/Code Security, run one of the following commands:
