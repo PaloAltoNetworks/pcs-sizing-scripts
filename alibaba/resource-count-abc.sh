@@ -27,6 +27,8 @@
 #
 # - aliyun ecs DescribeRegions
 # - aliyun ecs DescribeInstances
+# - aliyun rds DescribeDBInstances
+# - aliyun slb DescribeLoadBalancers # Assumed command
 ##########################################################################################
 
 ##########################################################################################
@@ -63,6 +65,79 @@ abc_compute_instances_list() {
   fi
 }
 
+abc_rds_instances_list() {
+  # Assuming pagination uses PageNumber and PageSize
+  PAGE_NUMBER=1
+  PAGE_SIZE=50
+  TOTAL_COUNT=-1 # Use -1 to indicate not yet fetched or error
+
+  while true; do
+    # shellcheck disable=SC2086
+    RESULT=$(aliyun rds DescribeDBInstances --region "${1}" --PageNumber ${PAGE_NUMBER} --PageSize ${PAGE_SIZE} 2>/dev/null)
+
+    if [ $? -ne 0 ]; then
+      TOTAL_COUNT=-1
+      break
+    fi
+
+    CURRENT_ITEMS=$(echo "${RESULT}" | jq -r '.Items.DBInstance | length' 2>/dev/null)
+    if [ ${PAGE_NUMBER} -eq 1 ]; then
+       TOTAL_COUNT=0
+    fi
+
+    if ! [[ "${CURRENT_ITEMS}" =~ ^[0-9]+$ ]]; then
+        TOTAL_COUNT=-1
+        break
+    fi
+
+    TOTAL_COUNT=$((TOTAL_COUNT + CURRENT_ITEMS))
+
+    if [ "${CURRENT_ITEMS}" -lt "${PAGE_SIZE}" ]; then
+      break
+    fi
+    PAGE_NUMBER=$((PAGE_NUMBER + 1))
+  done
+  echo "${TOTAL_COUNT}"
+}
+
+abc_slb_instances_list() {
+  # Assuming pagination uses PageNumber and PageSize for SLB as well
+  PAGE_NUMBER=1
+  PAGE_SIZE=50
+  TOTAL_COUNT=-1 # Use -1 to indicate not yet fetched or error
+
+  while true; do
+    # shellcheck disable=SC2086
+    # Using assumed command: DescribeLoadBalancers
+    RESULT=$(aliyun slb DescribeLoadBalancers --region "${1}" --PageNumber ${PAGE_NUMBER} --PageSize ${PAGE_SIZE} 2>/dev/null)
+
+    if [ $? -ne 0 ]; then
+      TOTAL_COUNT=-1
+      break
+    fi
+
+    # Adjust jq path based on actual API response structure for SLB
+    CURRENT_ITEMS=$(echo "${RESULT}" | jq -r '.LoadBalancers.LoadBalancer | length' 2>/dev/null)
+    if [ ${PAGE_NUMBER} -eq 1 ]; then
+       TOTAL_COUNT=0
+    fi
+
+    if ! [[ "${CURRENT_ITEMS}" =~ ^[0-9]+$ ]]; then
+        TOTAL_COUNT=-1
+        break
+    fi
+
+    TOTAL_COUNT=$((TOTAL_COUNT + CURRENT_ITEMS))
+
+    if [ "${CURRENT_ITEMS}" -lt "${PAGE_SIZE}" ]; then
+      break
+    fi
+    PAGE_NUMBER=$((PAGE_NUMBER + 1))
+  done
+  echo "${TOTAL_COUNT}"
+}
+
+
 ####
 
 get_regions() {
@@ -71,23 +146,54 @@ get_regions() {
 }
 
 get_instance_count() {
+  # This function specifically gets ECS instance count using TotalCount field if available
   COUNT=0
   RESULT=$(abc_compute_instances_list "${1}")
-  COUNT=$(echo "${RESULT}" | jq -r '.TotalCount' 2>/dev/null)
+  # Check if TotalCount exists and is a number
+  TOTAL_COUNT_VAL=$(echo "${RESULT}" | jq -r '.TotalCount' 2>/dev/null)
+  if [[ "${TOTAL_COUNT_VAL}" =~ ^[0-9]+$ ]]; then
+      COUNT=${TOTAL_COUNT_VAL}
+  else
+      # Fallback to pagination if TotalCount is not reliable
+      COUNT=$(get_instance_count_via_pagination "${1}")
+  fi
   echo "${COUNT}"
 }
 
 get_instance_count_via_pagination() {
+  # This function specifically gets ECS instance count via pagination
   COUNT=0
-  RESULT=$(abc_compute_instances_list "${1}")
-  INSTANCES=($(echo "${RESULT}" | jq -r '.Instances.Instance[].InstanceId' 2>/dev/null))
-  COUNT=$((COUNT + ${#INSTANCES[@]}))
-  NEXTTOKEN=$(echo "${RESULT}" | jq -r '.NextToken' 2>/dev/null)
-  while [ -n "${NEXTTOKEN}" ]; do
-    RESULT=$(abc_compute_instances_list "${1}" "${NEXTTOKEN}")
-    INSTANCES=($(echo "${RESULT}" | jq -r '.Instances.Instance[].InstanceId' 2>/dev/null))
-    COUNT=$((COUNT + ${#INSTANCES[@]}))
-    NEXTTOKEN=$(echo "${RESULT}" | jq -r '.NextToken' 2>/dev/null)
+  NEXTTOKEN=""
+  INSTANCES_ON_PAGE=0
+  PAGE_NUM=1 # For safety break
+
+  while [ -z "$NEXTTOKEN" ] || [ "$NEXTTOKEN" != "null" ] && [ "$NEXTTOKEN" != "" ] && [ $PAGE_NUM -lt 100 ]; do # Safety break after 100 pages
+      if [ -z "$NEXTTOKEN" ] || [ "$NEXTTOKEN" == "null" ]; then
+          RESULT=$(abc_compute_instances_list "${1}")
+      else
+          RESULT=$(abc_compute_instances_list "${1}" "${NEXTTOKEN}")
+      fi
+
+      if [ $? -ne 0 ]; then
+          # If first page fails, return error (-1)
+          [ $PAGE_NUM -eq 1 ] && echo "-1" && return 1
+          # Otherwise break loop, returning current count
+          break
+      fi
+
+      INSTANCES_ON_PAGE=$(echo "${RESULT}" | jq -r '.Instances.Instance | length' 2>/dev/null)
+      if ! [[ "${INSTANCES_ON_PAGE}" =~ ^[0-9]+$ ]]; then
+          [ $PAGE_NUM -eq 1 ] && echo "-1" && return 1
+          break
+      fi
+
+      COUNT=$((COUNT + INSTANCES_ON_PAGE))
+      NEXTTOKEN=$(echo "${RESULT}" | jq -r '.NextToken' 2>/dev/null)
+      PAGE_NUM=$((PAGE_NUM + 1))
+
+      # Break if no instances on page (should coincide with empty NextToken)
+      [ $INSTANCES_ON_PAGE -eq 0 ] && break
+
   done
   echo "${COUNT}"
 }
@@ -98,11 +204,15 @@ get_instance_count_via_pagination() {
 
 reset_local_counters() {
   COMPUTE_INSTANCES_COUNT=0
+  RDS_INSTANCES_COUNT=0
+  SLB_INSTANCES_COUNT=0 # Added SLB counter
   WORKLOAD_COUNT=0
 }
 
 reset_global_counters() {
   COMPUTE_INSTANCES_COUNT_GLOBAL=0
+  RDS_INSTANCES_COUNT_GLOBAL=0
+  SLB_INSTANCES_COUNT_GLOBAL=0 # Added SLB counter
   WORKLOAD_COUNT_GLOBAL=0
 }
 
@@ -118,23 +228,53 @@ count_resources() {
     echo "###################################################################################"
     echo "Processing Region: ${REGION}"
 
-    RESOURCE_COUNT=$(get_instance_count "${REGION}")
-    COMPUTE_INSTANCES_COUNT=$((COMPUTE_INSTANCES_COUNT + RESOURCE_COUNT))
-    echo "  Count of Compute Instances: ${COMPUTE_INSTANCES_COUNT}"
+    # Get ECS count
+    RESOURCE_COUNT_ECS=$(get_instance_count "${REGION}")
+     if [ "${RESOURCE_COUNT_ECS}" -lt 0 ]; then
+      echo "  Warning: Could not retrieve ECS instance count for region ${REGION}."
+      RESOURCE_COUNT_ECS=0
+    fi
+    COMPUTE_INSTANCES_COUNT=$((COMPUTE_INSTANCES_COUNT + RESOURCE_COUNT_ECS))
+    echo "  Count of Compute Instances (ECS): ${COMPUTE_INSTANCES_COUNT}"
 
-    WORKLOAD_COUNT=$((COMPUTE_INSTANCES_COUNT + 0))
+    # Get RDS count
+    RESOURCE_COUNT_RDS=$(abc_rds_instances_list "${REGION}")
+    if [ "${RESOURCE_COUNT_RDS}" -lt 0 ]; then
+      echo "  Warning: Could not retrieve RDS instance count for region ${REGION}."
+      RESOURCE_COUNT_RDS=0
+    fi
+    RDS_INSTANCES_COUNT=$((RDS_INSTANCES_COUNT + RESOURCE_COUNT_RDS))
+    echo "  Count of RDS Instances: ${RDS_INSTANCES_COUNT}"
+
+    # Get SLB count
+    RESOURCE_COUNT_SLB=$(abc_slb_instances_list "${REGION}")
+     if [ "${RESOURCE_COUNT_SLB}" -lt 0 ]; then
+      echo "  Warning: Could not retrieve SLB instance count for region ${REGION}."
+      RESOURCE_COUNT_SLB=0
+    fi
+    SLB_INSTANCES_COUNT=$((SLB_INSTANCES_COUNT + RESOURCE_COUNT_SLB))
+    echo "  Count of Load Balancers (SLB): ${SLB_INSTANCES_COUNT}"
+
+    # Update workload count
+    WORKLOAD_COUNT=$((COMPUTE_INSTANCES_COUNT + RDS_INSTANCES_COUNT + SLB_INSTANCES_COUNT))
     echo "Total billable resources for Region: ${WORKLOAD_COUNT}"
     echo "###################################################################################"
     echo ""
 
+    # Update global counters
     COMPUTE_INSTANCES_COUNT_GLOBAL=$((COMPUTE_INSTANCES_COUNT_GLOBAL + COMPUTE_INSTANCES_COUNT))
+    RDS_INSTANCES_COUNT_GLOBAL=$((RDS_INSTANCES_COUNT_GLOBAL + RDS_INSTANCES_COUNT))
+    SLB_INSTANCES_COUNT_GLOBAL=$((SLB_INSTANCES_COUNT_GLOBAL + SLB_INSTANCES_COUNT)) # Added SLB
     reset_local_counters
   done
 
   echo "###################################################################################"
   echo "Totals"
-  echo "  Count of Compute Instances: ${COMPUTE_INSTANCES_COUNT_GLOBAL}"
-  WORKLOAD_COUNT_GLOBAL=$((COMPUTE_INSTANCES_COUNT_GLOBAL + 0))
+  echo "  Count of Compute Instances (ECS): ${COMPUTE_INSTANCES_COUNT_GLOBAL}"
+  echo "  Count of RDS Instances: ${RDS_INSTANCES_COUNT_GLOBAL}"
+  echo "  Count of Load Balancers (SLB): ${SLB_INSTANCES_COUNT_GLOBAL}" # Added SLB to summary
+  # Update final workload count
+  WORKLOAD_COUNT_GLOBAL=$((COMPUTE_INSTANCES_COUNT_GLOBAL + RDS_INSTANCES_COUNT_GLOBAL + SLB_INSTANCES_COUNT_GLOBAL))
   echo "Total billable resources: ${WORKLOAD_COUNT_GLOBAL}"
   echo "###################################################################################"
 }
