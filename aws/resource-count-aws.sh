@@ -129,8 +129,9 @@ total_ec2_instances=0
 total_eks_nodes=0
 total_eks_clusters=0
 total_docker_hosts=0
-total_ecs_clusters=0 # Added
-total_ecs_tasks=0    # Added
+total_ecs_clusters=0
+total_ecs_tasks=0
+total_lambda_functions=0 # Added
 total_s3_buckets=0
 total_efs=0
 total_aurora=0
@@ -303,8 +304,9 @@ count_resources() {
         local account_ec2_count=0
         local account_eks_nodes=0
         local account_eks_clusters=0
-        local account_ecs_clusters=0 # Added
-        local account_ecs_tasks=0    # Added
+        local account_ecs_clusters=0
+        local account_ecs_tasks=0
+        local account_lambda_functions=0 # Added
         local account_docker_hosts=0
         local docker_host_tag_key="DockerHost" # Define tag key here
 
@@ -338,7 +340,7 @@ count_resources() {
         local list_eks_clusters_exit_code=0
         local eks_cluster_map_file=""
         if [[ -z "${current_region}" ]]; then
-            eks_cluster_map_file=$(mktemp)
+            eks_cluster_map_file=$(mktemp /tmp/eks_map.XXXXXX) # Use mktemp for safety
         fi
 
         if [[ -n "${current_region}" ]]; then
@@ -432,7 +434,7 @@ count_resources() {
         local list_ecs_clusters_exit_code=0
         local ecs_cluster_map_file=""
          if [[ -z "${current_region}" ]]; then
-            ecs_cluster_map_file=$(mktemp)
+            ecs_cluster_map_file=$(mktemp /tmp/ecs_map.XXXXXX) # Use mktemp for safety
         fi
 
         if [[ -n "${current_region}" ]]; then
@@ -563,6 +565,31 @@ count_resources() {
          if [ -f "$ecs_cluster_map_file" ]; then
             rm "$ecs_cluster_map_file"
         fi
+
+        # Count Lambda Functions
+        echo "  Counting Lambda functions..."
+        if [[ -n "${current_region}" ]]; then
+            # Use --no-paginate and jq length for a simple count in a single region
+            count_in_region=$(aws lambda list-functions --region "$current_region" --no-paginate --query "Functions" --output json 2>/dev/null | jq 'length')
+             if [ $? -eq 0 ] && [[ "$count_in_region" =~ ^[0-9]+$ ]]; then
+                 if [ "$count_in_region" -gt 0 ]; then echo "    Region $current_region: $count_in_region Lambda Functions"; fi
+                 account_lambda_functions=$((account_lambda_functions + count_in_region))
+             else echo "    Warning: Failed to count Lambda Functions in region $current_region."; fi
+        else
+            echo "    Across all accessible regions..."
+            for r in $activeRegions; do
+                # Use --no-paginate and jq length for a simple count per region
+                count_in_region=$(aws lambda list-functions --region "$r" --no-paginate --query "Functions" --output json 2>/dev/null | jq 'length')
+                 if [ $? -eq 0 ] && [[ "$count_in_region" =~ ^[0-9]+$ ]]; then
+                     if [ "$count_in_region" -gt 0 ]; then echo "      Region $r: $count_in_region Lambda Functions"; fi
+                     account_lambda_functions=$((account_lambda_functions + count_in_region))
+                 # else echo "      Skipping region $r (no access or error)" # Optional
+                 fi
+            done
+        fi
+        echo "  Lambda functions found in account: $account_lambda_functions"
+        total_lambda_functions=$((total_lambda_functions + account_lambda_functions))
+
 
         # Count EC2 instances tagged as Docker Hosts
         echo "  Counting EC2 instances tagged as Docker Hosts (Tag Key: $docker_host_tag_key)..."
@@ -774,8 +801,9 @@ if [ "$DSPM_MODE" == false ]; then
     echo "EC2 instances ($STATE): $total_ec2_instances"
     echo "EKS nodes (desired):    $total_eks_nodes"
     echo "EKS clusters:           $total_eks_clusters"
-    echo "ECS tasks (running):    $total_ecs_tasks"     # Added
-    echo "ECS clusters:           $total_ecs_clusters"    # Added
+    echo "ECS tasks (running):    $total_ecs_tasks"
+    echo "ECS clusters:           $total_ecs_clusters"
+    echo "Lambda functions:       $total_lambda_functions" # Added
     echo "EC2 Docker Hosts (tagged '$docker_host_tag_key', $STATE): $total_docker_hosts"
     echo ""
 fi
