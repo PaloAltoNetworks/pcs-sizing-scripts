@@ -44,6 +44,7 @@ fi
 COMPUTE_INSTANCE_TYPE="Instance"
 DB_SYSTEM_TYPE="DbSystem"
 LOAD_BALANCER_TYPE="LoadBalancer"
+FUNCTION_TYPE="Function" # Added Function type
 
 ##########################################################################################
 ## Count resources using OCI Search.
@@ -55,7 +56,8 @@ count_resources() {
   # Construct the query string
   # We are looking for resources of specific types that are in an ACTIVE/RUNNING/AVAILABLE state.
   # Adjust lifecycle states as needed based on OCI documentation for each resource type.
-  QUERY="query all resources where (resourceType = '${COMPUTE_INSTANCE_TYPE}' && lifecycleState = 'RUNNING') || (resourceType = '${DB_SYSTEM_TYPE}' && lifecycleState = 'AVAILABLE') || (resourceType = '${LOAD_BALANCER_TYPE}' && lifecycleState = 'ACTIVE')"
+  # Assuming 'ACTIVE' is the relevant state for Functions.
+  QUERY="query all resources where (resourceType = '${COMPUTE_INSTANCE_TYPE}' && lifecycleState = 'RUNNING') || (resourceType = '${DB_SYSTEM_TYPE}' && lifecycleState = 'AVAILABLE') || (resourceType = '${LOAD_BALANCER_TYPE}' && lifecycleState = 'ACTIVE') || (resourceType = '${FUNCTION_TYPE}' && lifecycleState = 'ACTIVE')"
 
   # Execute the search command
   # We only need the count, jq can sum this up directly if we query just the resource type.
@@ -71,18 +73,22 @@ count_resources() {
   COMPUTE_INSTANCES_COUNT_GLOBAL=$(echo "${SEARCH_RESULTS}" | jq -r --arg type "${COMPUTE_INSTANCE_TYPE}" 'map(select(. == $type)) | length')
   BARE_METAL_VM_DB_COUNT_GLOBAL=$(echo "${SEARCH_RESULTS}" | jq -r --arg type "${DB_SYSTEM_TYPE}" 'map(select(. == $type)) | length')
   LOAD_BALANCER_COUNT_GLOBAL=$(echo "${SEARCH_RESULTS}" | jq -r --arg type "${LOAD_BALANCER_TYPE}" 'map(select(. == $type)) | length')
+  FUNCTION_COUNT_GLOBAL=$(echo "${SEARCH_RESULTS}" | jq -r --arg type "${FUNCTION_TYPE}" 'map(select(. == $type)) | length') # Added Function count
 
   # Handle potential nulls from jq if no resources are found
   COMPUTE_INSTANCES_COUNT_GLOBAL=${COMPUTE_INSTANCES_COUNT_GLOBAL:-0}
   BARE_METAL_VM_DB_COUNT_GLOBAL=${BARE_METAL_VM_DB_COUNT_GLOBAL:-0}
   LOAD_BALANCER_COUNT_GLOBAL=${LOAD_BALANCER_COUNT_GLOBAL:-0}
+  FUNCTION_COUNT_GLOBAL=${FUNCTION_COUNT_GLOBAL:-0} # Added Function count handling
 
   echo "###################################################################################"
   echo "Totals (across all compartments)"
   echo "  Count of Compute Instances (${COMPUTE_INSTANCE_TYPE}, RUNNING): ${COMPUTE_INSTANCES_COUNT_GLOBAL}"
   echo "  Count of DB Systems (${DB_SYSTEM_TYPE}, AVAILABLE): ${BARE_METAL_VM_DB_COUNT_GLOBAL}"
   echo "  Count of Load Balancers (${LOAD_BALANCER_TYPE}, ACTIVE): ${LOAD_BALANCER_COUNT_GLOBAL}"
-  WORKLOAD_COUNT_GLOBAL=$((COMPUTE_INSTANCES_COUNT_GLOBAL + BARE_METAL_VM_DB_COUNT_GLOBAL + LOAD_BALANCER_COUNT_GLOBAL))
+  echo "  Count of Functions (${FUNCTION_TYPE}, ACTIVE): ${FUNCTION_COUNT_GLOBAL}" # Added Function output
+  # Update total workload count
+  WORKLOAD_COUNT_GLOBAL=$((COMPUTE_INSTANCES_COUNT_GLOBAL + BARE_METAL_VM_DB_COUNT_GLOBAL + LOAD_BALANCER_COUNT_GLOBAL + FUNCTION_COUNT_GLOBAL))
   echo "Total billable resources: ${WORKLOAD_COUNT_GLOBAL}"
   echo "###################################################################################"
 }
