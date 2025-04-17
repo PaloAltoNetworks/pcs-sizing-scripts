@@ -3,440 +3,230 @@
 Describe 'resource-count-aws'
 
   ########################################################################################
-  # https://github.com/shellspec/shellspec#include---include-a-script-file
+  # Includes and Setup
   ########################################################################################
 
   Include aws/resource-count-aws.sh
 
-  ########################################################################################
-  # https://github.com/shellspec/shellspec#function-based-mock
-  ########################################################################################
-
-  aws_ec2_describe_regions() {
-    cat << EOJ
-{
-    "Regions": [
-        {
-            "Endpoint": "ec2.us-east-1.amazonaws.com",
-            "RegionName": "us-east-1",
-            "OptInStatus": "opt-in-not-required"
-        },
-        {
-            "Endpoint": "ec2.us-east-2.amazonaws.com",
-            "RegionName": "us-east-2",
-            "OptInStatus": "opt-in-not-required"
-        },
-        {
-            "Endpoint": "ec2.us-west-1.amazonaws.com",
-            "RegionName": "us-west-1",
-            "OptInStatus": "opt-in-not-required"
-        },
-        {
-            "Endpoint": "ec2.us-west-2.amazonaws.com",
-            "RegionName": "us-west-2",
-            "OptInStatus": "opt-in-not-required"
-        }
-    ]
-}
-EOJ
+  # Mock AWS CLI commands
+  # Mock basic identity and region listing
+  aws() {
+    case "$1 $2" in
+      "sts get-caller-identity")
+        echo '{"Account": "123456789012", "UserId": "AIDACKCEVSQ6C2EXAMPLE", "Arn": "arn:aws:iam::123456789012:user/testuser"}'
+        return 0
+        ;;
+      "account list-regions")
+        # Mock fewer regions for simpler test calculations
+        echo '{"Regions": [{"RegionName": "us-east-1"}, {"RegionName": "us-west-2"}]}'
+        return 0
+        ;;
+      "organizations list-accounts")
+         # Mock only one active sub-account for simplicity in org mode test
+         echo '{"Accounts": [{"Id": "111111111111", "Status": "ACTIVE"}, {"Id": "222222222222", "Status": "ACTIVE"}]}'
+         return 0
+        ;;
+       "sts assume-role")
+         # Mock successful role assumption
+         echo '{"Credentials": {"AccessKeyId": "ASIA...", "SecretAccessKey": "...", "SessionToken": "...", "Expiration": "..."}}'
+         return 0
+         ;;
+       "ec2 describe-instances")
+         # Check for DockerHost tag filter
+         if [[ "$*" =~ Name=tag-key,Values=DockerHost ]]; then
+            # Mock 1 Docker Host per region
+            echo '{"Reservations": [{"Instances": [{"InstanceId": "i-dockerhost1"}]}]}'
+         else
+            # Mock 2 general EC2 instances per region
+            echo '{"Reservations": [{"Instances": [{"InstanceId": "i-instance1"}, {"InstanceId": "i-instance2"}]}]}'
+         fi
+         return 0
+         ;;
+       "eks list-clusters")
+         # Mock 1 EKS cluster per region
+         echo '{"clusters": ["eks-cluster-1"]}'
+         return 0
+         ;;
+       "eks list-nodegroups")
+         # Mock 1 nodegroup per cluster
+         echo '{"nodegroups": ["eks-nodegroup-1"]}'
+         return 0
+         ;;
+       "eks describe-nodegroup")
+         # Mock 2 desired nodes per nodegroup
+         echo '{"nodegroup": {"scalingConfig": {"desiredSize": 2}}}'
+         return 0
+         ;;
+       "ecs list-clusters")
+         # Mock 1 ECS cluster per region
+         echo '{"clusterArns": ["arn:aws:ecs:us-east-1:123456789012:cluster/ecs-cluster-1"]}'
+         return 0
+         ;;
+       "ecs list-services")
+         # Mock 2 services per cluster, no pagination needed for test
+         echo '{"serviceArns": ["arn:aws:ecs:us-east-1:123456789012:service/ecs-cluster-1/service-1", "arn:aws:ecs:us-east-1:123456789012:service/ecs-cluster-1/service-2"]}'
+         return 0
+         ;;
+       "ecs describe-services")
+         # Mock running counts for the 2 services (e.g., 3 + 1 = 4 tasks per cluster)
+         echo '{"services": [{"runningCount": 3}, {"runningCount": 1}]}'
+         return 0
+         ;;
+       "lambda list-functions")
+         # Mock 5 functions per region (using --no-paginate approach)
+         echo '{"Functions": [{}, {}, {}, {}, {}]}'
+         return 0
+         ;;
+       # Keep DSPM mocks simple for now, focus on Cloud Security counts
+       "s3api list-buckets") echo '{"Buckets": [{"Name": "bucket1"}, {"Name": "bucket2"}]}' ;;
+       "efs describe-file-systems") echo '{"FileSystems": [{"FileSystemId": "fs-1"}]}' ;;
+       "rds describe-db-clusters") echo '{"DBClusters": [{"DBClusterIdentifier": "aurora-1"}]}' ;;
+       "rds describe-db-instances") echo '{"DBInstances": [{"DBInstanceIdentifier": "rds-1"}]}' ;;
+       "dynamodb list-tables") echo '{"TableNames": ["table1", "table2", "table3"]}' ;;
+       "redshift describe-clusters") echo '{"Clusters": [{"ClusterIdentifier": "redshift-1"}]}' ;;
+       # Mock SSM commands to succeed but find no DBs for simplicity unless -c is tested
+       "ssm describe-instance-information") echo '{"InstanceInformationList": [{"InstanceId": "i-instance1"}]}' ;; # Assume one instance is managed
+       "ssm send-command") echo '{"Command": {"CommandId": "cmd-123"}}' ;;
+       "ssm list-command-invocations") echo '{"CommandInvocations": [{"Status": "Success", "CommandPlugins": [{"Output": ""}]}]}' ;; # Mock no output found
+       *)
+         # Default mock for unhandled commands (e.g., config set)
+         # echo "Mocked AWS command: $@" >&2
+         return 0
+         ;;
+    esac
   }
-
-  aws_organizations_describe_organization() {
-    cat << EOJ
-{
-    "Organization": {
-        "MasterAccountArn": "arn:aws:organizations::011111111111:account/o-exampleorgid/011111111111",
-        "MasterAccountEmail": "bill@example.com",
-        "MasterAccountId": "011111111111",
-        "Id": "o-exampleorgid",
-        "FeatureSet": "ALL",
-        "Arn": "arn:aws:organizations::011111111111:organization/o-exampleorgid",
-        "AvailablePolicyTypes": [{
-            "Status": "ENABLED",
-            "Type": "SERVICE_CONTROL_POLICY"
-        }]
-    }
-}
-EOJ
-  }
-
-  aws_organizations_list_accounts() {
-    cat << EOJ
-{
-    "Accounts": [{
-            "Arn": "arn:aws:organizations::011111111111:account/o-exampleorgid/011111111111",
-            "JoinedMethod": "INVITED",
-            "JoinedTimestamp": 1481830215.45,
-            "Id": "011111111111",
-            "Name": "MasterAccount",
-            "Email": "bill@example.com",
-            "Status": "ACTIVE"
-        },
-        {
-            "Arn": "arn:aws:organizations::011111111111:account/o-exampleorgid/222222222222",
-            "JoinedMethod": "INVITED",
-            "JoinedTimestamp": 1481835741.044,
-            "Id": "222222222222",
-            "Name": "ProductionAccount",
-            "Email": "alice@example.com",
-            "Status": "ACTIVE"
-        },
-        {
-            "Arn": "arn:aws:organizations::011111111111:account/o-exampleorgid/333333333333",
-            "JoinedMethod": "INVITED",
-            "JoinedTimestamp": 1481835795.536,
-            "Id": "333333333333",
-            "Name": "DevelopmentAccount",
-            "Email": "juan@example.com",
-            "Status": "ACTIVE"
-        },
-        {
-            "Arn": "arn:aws:organizations::011111111111:account/o-exampleorgid/444444444444",
-            "JoinedMethod": "INVITED",
-            "JoinedTimestamp": 1481835812.143,
-            "Id": "444444444444",
-            "Name": "TestAccount",
-            "Email": "anika@example.com",
-            "Status": "ACTIVE"
-        }
-    ]
-}
-EOJ
-  }
-
-  aws_sts_assume_role() {
-    cat << EOJ
-{
-    "AssumedRoleUser": {
-        "AssumedRoleId": "AROA3XFRBF535PLBIFPI4:s3-access-example",
-        "Arn": "arn:aws:organizations::011111111111:account/o-exampleorgid/222222222222"
-    },
-    "Credentials": {
-        "SecretAccessKey": "9drTJvcXLB89EXAMPLELB8923FB892xMFI",
-        "SessionToken": "AQoXdzELDDY//////////wEaoAK1wvxJY12r2IrDFT2IvAzTCn3zHoZ7YNtpiQLF0MqZye/qwjzP2iEXAMPLEbw/m3hsj8VBTkPORGvr9jM5sgP+w9IZWZnU+LWhmg+a5fDi2oTGUYcdg9uexQ4mtCHIHfi4citgqZTgco40Yqr4lIlo4V2b2Dyauk0eYFNebHtYlFVgAUj+7Indz3LU0aTWk1WKIjHmmMCIoTkyYp/k7kUG7moeEYKSitwQIi6Gjn+nyzM+PtoA3685ixzv0R7i5rjQi0YE0lf1oeie3bDiNHncmzosRM6SFiPzSvp6h/32xQuZsjcypmwsPSDtTPYcs0+YN/8BRi2/IcrxSpnWEXAMPLEXSDFTAQAM6Dl9zR0tXoybnlrZIwMLlMi1Kcgo5OytwU=",
-        "Expiration": "2020-12-15T00:00:00Z",
-        "AccessKeyId": "EXAMPLE2222222EXAMPLE"
-    }
-}
-EOJ
-  }
- 
-  ####
-
-  aws_ec2_describe_instances() {
-    cat << EOJ
-{
-    "Reservations": [{
-            "Groups": [],
-            "Instances": [{
-                    "InstanceId": "0abcdef1234567890"
-                },
-                {
-                    "InstanceId": "0abcdef1234567891"
-                }
-            ]
-        },
-        {
-            "Groups": [],
-            "Instances": [{
-                "InstanceId": "1abcdef1234567890"
-            }]
-        }
-    ]
-}
-EOJ
-  }
-
-  aws_ec2_describe_db_instances() {
-    cat << EOJ
-{
-    "Instances": [{
-        "InstanceId": "0abcdef1234567890"
-    }]
-}
-EOJ
-  }
-
-  aws_ec2_describe_nat_gateways() {
-    cat << EOJ
-{
-    "Instances": [{
-        "InstanceId": "0abcdef1234567890"
-    }]
-}
-EOJ
-  }
-
-  aws_redshift_describe_clusters() {
-    cat << EOJ
-{
-    "Instances": [{
-        "InstanceId": "0abcdef1234567890"
-    }]
-}
-EOJ
-  }
-
-  aws_elb_describe_load_balancers() {
-    cat << EOJ
-{
-    "Instances": [{
-        "InstanceId": "0abcdef1234567890"
-    }]
-}
-EOJ
-  }
-
-aws_eks_list_clusters() {
-  cat << EOJ
-  {
-    "clusters": [
-        "eks-cluster-1"
-    ]
-  }
-EOJ
-}
-
-aws_eks_list_nodegroups() {
-  cat << EOJ
-  {
-    "nodegroups": [
-        "nodes"
-    ]
-  }
-EOJ
-}
-
-aws_eks_describe_nodegroup() {
-  cat << EOJ
-  {
-    "nodegroup": {
-      "scalingConfig": {
-          "minSize": 2,
-          "maxSize": 4,
-          "desiredSize": 2
-      }
-    }
-  }
-EOJ
-}
-
-  aws_ecs_list_clusters() {
-    cat << EOJ
-{
-    "clusterArns": [
-        "arn:aws:ecs:us-west-2:123456789012:cluster/Cluster1",
-        "arn:aws:ecs:us-west-2:123456789012:cluster/Cluster2"
-    ]
-}
-EOJ
-  }
-
-  aws_ecs_list_tasks() {
-    cat << EOJ
-{
-    "taskArns": [
-        "arn:aws:ecs:us-west-2:123456789012:task/a1b2c3d4-5678-90ab-cdef-11111EXAMPLE",
-        "arn:aws:ecs:us-west-2:123456789012:task/a1b2c3d4-5678-90ab-cdef-22222EXAMPLE",
-        "arn:aws:ecs:us-west-2:123456789012:task/a1b2c3d4-5678-90ab-cdef-33333EXAMPLE"
-    ]
-}
-EOJ
-  }
-
-  aws_lambda_get_account_settings() {
-    cat << EOJ
-{
-    "AccountLimit": {},
-    "AccountUsage": {
-       "FunctionCount": 3
-    }
-}
-EOJ
-  }
-
-  aws_s3api_list_buckets() {
-    cat << EOJ
-    [
-      "testing123",
-      "fakebucket456",
-      "notyours789"
-    ]
-EOJ
-  }
-
-  aws_s3_ls_bucket_size() {
-    echo "423451539000"
-  }  
+  # Export the mock function to be used by the included script
+  export -f aws
 
   ########################################################################################
-  # https://github.com/shellspec/shellspec#it-specify-example---example-block
+  # Tests
   ########################################################################################
 
-  It 'returns a list of regions or the default list'
-    When call get_region_list
-    The output should not include "Warning:"
-    The variable REGION_LIST[@] should eq "us-east-1 us-east-2 us-west-1 us-west-2"
+  # Reset counters before each test group if necessary
+  BeforeEach 'reset_global_counters'
+
+  Describe 'Standalone Account Mode (No Org)'
+    Parameters
+      # DSPM_MODE, SSM_MODE, Expected EC2, EKS Nodes, EKS Clusters, ECS Tasks, ECS Clusters, Lambda, Docker Hosts
+      false false 4 4 2 8 2 10 2 # Default Cloud Security
+      true  false 0 0 0 0 0 0  0 # DSPM only (Cloud Security counts skipped)
+      true  true  0 0 0 0 0 0  0 # DSPM + SSM (Cloud Security counts skipped)
+    End
+
+    It "counts resources correctly (DSPM=$1, SSM=$2)"
+      DSPM_MODE=$1
+      SSM_MODE=$2
+      ORG_MODE=false # Ensure standalone mode
+      REGION=""      # Ensure all regions scan
+
+      # Expected counts based on 2 mocked regions
+      local expected_ec2=$3
+      local expected_eks_nodes=$4
+      local expected_eks_clusters=$5
+      local expected_ecs_tasks=$6
+      local expected_ecs_clusters=$7
+      local expected_lambda=$8
+      local expected_docker_hosts=$9
+      # DSPM counts (simple mocks, 2 regions where applicable)
+      local expected_s3=2 # Global
+      local expected_efs=2
+      local expected_aurora=2
+      local expected_rds=2
+      local expected_dynamo=6
+      local expected_redshift=2
+      local expected_ec2_db=0 # Mock finds no DBs via SSM
+
+      When run script aws/resource-count-aws.sh # Rerun script logic with current settings
+
+      # Check Cloud Security Counts
+      if [ "$DSPM_MODE" == false ]; then
+        The variable total_ec2_instances should eq "$expected_ec2"
+        The variable total_eks_nodes should eq "$expected_eks_nodes"
+        The variable total_eks_clusters should eq "$expected_eks_clusters"
+        The variable total_ecs_tasks should eq "$expected_ecs_tasks"
+        The variable total_ecs_clusters should eq "$expected_ecs_clusters"
+        The variable total_lambda_functions should eq "$expected_lambda"
+        The variable total_docker_hosts should eq "$expected_docker_hosts"
+      fi
+
+       # Check DSPM Counts
+      if [ "$DSPM_MODE" == true ]; then
+        The variable total_s3_buckets should eq "$expected_s3"
+        The variable total_efs should eq "$expected_efs"
+        The variable total_aurora should eq "$expected_aurora"
+        The variable total_rds should eq "$expected_rds"
+        The variable total_dynamodb should eq "$expected_dynamo"
+        The variable total_redshift should eq "$expected_redshift"
+        if [ "$SSM_MODE" == true ]; then
+           The variable total_ec2_db should eq "$expected_ec2_db"
+        fi
+      fi
+
+      The status should be success
+      The error should be empty # Check no errors printed
+    End
   End
 
-  ####
+  Describe 'Organization Mode'
+    Parameters
+      # DSPM_MODE, SSM_MODE, Expected EC2, EKS Nodes, EKS Clusters, ECS Tasks, ECS Clusters, Lambda, Docker Hosts
+      false false 8 8 4 16 4 20 4 # Default Cloud Security (2 accounts * standalone counts)
+      true  false 0 0 0 0  0 0  0 # DSPM only
+      true  true  0 0 0 0  0 0  0 # DSPM + SSM
+    End
 
-  It 'returns a list of one account'
-    USE_AWS_ORG="false"
-    When call get_account_list
-    The output should not include "Error:"
-    The variable TOTAL_ACCOUNTS should eq 1
-  End
+     It "counts resources correctly across org (DSPM=$1, SSM=$2)"
+      DSPM_MODE=$1
+      SSM_MODE=$2
+      ORG_MODE=true # Enable Org mode
+      REGION=""     # Ensure all regions scan
 
-  It 'returns a list of organization member accounts'
-    USE_AWS_ORG="true"
-    #
-    When call get_account_list
-    The output should not include "Error:"
-    The variable TOTAL_ACCOUNTS should eq 4
-  End
+      # Expected counts based on 2 mocked regions and 2 mocked accounts
+      local expected_ec2=$3
+      local expected_eks_nodes=$4
+      local expected_eks_clusters=$5
+      local expected_ecs_tasks=$6
+      local expected_ecs_clusters=$7
+      local expected_lambda=$8
+      local expected_docker_hosts=$9
+      # DSPM counts (simple mocks, 2 regions where applicable, 2 accounts)
+      local expected_s3=4 # Global
+      local expected_efs=4
+      local expected_aurora=4
+      local expected_rds=4
+      local expected_dynamo=12
+      local expected_redshift=4
+      local expected_ec2_db=0 # Mock finds no DBs via SSM
 
-  It 'assumes a role'
-    MASTER_ACCOUNT_ID=011111111111
-    #
-    When call assume_role "ProductionAccount" 222222222222
-    The output should not include "skipping"
-    The variable AWS_ACCESS_KEY_ID should eq "EXAMPLE2222222EXAMPLE"
-  End
+      When run script aws/resource-count-aws.sh # Rerun script logic
 
-  ####
+      # Check Cloud Security Counts
+      if [ "$DSPM_MODE" == false ]; then
+        The variable total_ec2_instances should eq "$expected_ec2"
+        The variable total_eks_nodes should eq "$expected_eks_nodes"
+        The variable total_eks_clusters should eq "$expected_eks_clusters"
+        The variable total_ecs_tasks should eq "$expected_ecs_tasks"
+        The variable total_ecs_clusters should eq "$expected_ecs_clusters"
+        The variable total_lambda_functions should eq "$expected_lambda"
+        The variable total_docker_hosts should eq "$expected_docker_hosts"
+      fi
 
-  It 'returns a list of Regions'
-    When call aws_ec2_describe_regions
-    The output should not include "Error"
-  End
+       # Check DSPM Counts
+      if [ "$DSPM_MODE" == true ]; then
+        The variable total_s3_buckets should eq "$expected_s3"
+        The variable total_efs should eq "$expected_efs"
+        The variable total_aurora should eq "$expected_aurora"
+        The variable total_rds should eq "$expected_rds"
+        The variable total_dynamodb should eq "$expected_dynamo"
+        The variable total_redshift should eq "$expected_redshift"
+        if [ "$SSM_MODE" == true ]; then
+           The variable total_ec2_db should eq "$expected_ec2_db"
+        fi
+      fi
 
-  It 'returns a list of EC2 Instances'
-    When call aws_ec2_describe_instances
-    The output should not include "Error"
-  End
-
-  It 'returns a list of EKS Clusters'
-    When call aws_eks_list_clusters
-    The output should not include "Error"
-  End
-
-  It 'returns a list of nodegroups'
-    When call aws_eks_list_nodegroups
-    The output should not include "Error"
-  End
-
-  It 'returns details of a node group'
-    When call aws_eks_describe_nodegroup
-    The output should not include "Error"
-  End
-
-  It 'returns a list of ECS Clusters'
-    When call aws_ecs_list_clusters
-    The output should not include "Error"
-  End
-
-  It 'returns a list of ECS Tasks'
-    When call aws_ecs_list_tasks
-    The output should not include "Error"
-  End
-
-  It 'returns a list of RDS Instances'
-    When call aws_ec2_describe_db_instances
-    The output should not include "Error"
-  End
-
-  It 'returns a list of NAT Gateways'
-    When call aws_ec2_describe_nat_gateways
-    The output should not include "Error"
-  End
-
-  It 'returns a list of RedShift Clusters'
-    When call aws_redshift_describe_clusters
-    The output should not include "Error"
-  End
-
-  It 'returns a list of ELBs'
-    When call aws_elb_describe_load_balancers
-    The output should not include "Error"
-  End
-
-  It 'returns lambda function statistics'
-    When call aws_lambda_get_account_settings
-    The output should not include "Error"
-  End
-
-  It 'returns a list of S3 buckets'
-    When call aws_s3api_list_buckets
-    The output should not include "Error"
-  End
-
-  It 'returns the size of a single bucket'
-    When call aws_s3_ls_bucket_size
-    The output should not include "-1"
-  End
-
-  ########################################################################################
-  # Note that resource totals are the result of the other mock api calls being called four times,
-  # as a result of the mock api region call returning four regions. 
-  ########################################################################################
-
-  It 'counts account resources'
-    USE_AWS_ORG="false"
-    get_account_list > /dev/null 2>&1
-    get_region_list  > /dev/null 2>&1
-    reset_account_counters
-    reset_global_counters
-    #
-    When call count_account_resources
-    The output should include "Count"
-    The variable TOTAL_ACCOUNTS should eq 1
-    The variable WORKLOAD_COUNT_GLOBAL should eq 28
-    The variable WORKLOAD_COUNT_GLOBAL_WITH_IAM_MODULE should eq 35
-  End
-
-  It 'counts organization member account resources'
-    USE_AWS_ORG="true"
-    get_account_list > /dev/null 2>&1
-    get_region_list  > /dev/null 2>&1
-    reset_account_counters
-    reset_global_counters
-    #
-    When call count_account_resources
-    The output should include "Count"
-    The variable TOTAL_ACCOUNTS should eq 4
-    The variable WORKLOAD_COUNT_GLOBAL should eq 112
-    The variable WORKLOAD_COUNT_GLOBAL_WITH_IAM_MODULE should eq 140
-  End
-
-  It 'counts compute resources'
-    USE_AWS_ORG="false"
-    WITH_CWP="true"
-    get_account_list > /dev/null 2>&1
-    get_region_list  > /dev/null 2>&1
-    reset_account_counters
-    reset_global_counters
-    #
-    When call count_account_resources
-    The output should include "Count"
-    The variable LAMBDA_COUNT_GLOBAL should eq 12
-    The variable LAMBDA_CREDIT_USAGE_GLOBAL should eq 2
-    The variable EKS_CLUSTER_NODE_COUNT should eq 16
-  End
-
-  It 'counts data size'
-    USE_AWS_ORG="false"
-    WITH_DATA="true"
-    get_account_list > /dev/null 2>&1
-    get_region_list  > /dev/null 2>&1
-    reset_account_counters
-    reset_global_counters
-    #
-    When call count_account_resources
-    The output should include "Count"
-    The variable S3_BUCKETS_SIZE_GIG_GLOBAL should eq 1270
-    The variable S3_BUCKETS_CREDIT_EXPOSURE_USAGE_GLOBAL should eq 6
-    The variable S3_BUCKETS_CREDIT_FULL_USAGE_GLOBAL should eq 38
+      The status should be success
+      The error should be empty
+    End
   End
 
 End
