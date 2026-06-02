@@ -1,0 +1,11 @@
+resources
+| where type =~ 'microsoft.compute/virtualmachines' or type =~ 'microsoft.compute/virtualmachinescalesets'
+| extend state = tostring(properties.extended.instanceView.powerState.code)
+// 如果是标准VM且Running，计为1；否则计为0
+| extend runningStandardVMs = iff(type =~ 'microsoft.compute/virtualmachines' and state =~ 'PowerState/running', 1, 0)
+// 如果是VMSS，直接取其容量(capacity)作为节点数
+| extend vmssNodes = iff(type =~ 'microsoft.compute/virtualmachinescalesets', toint(sku.capacity), 0)
+| summarize 
+    TotalRunningStandardVMs = sum(runningStandardVMs), 
+    TotalVmssNodes = sum(vmssNodes), 
+    GrandTotal = sum(runningStandardVMs) + sum(vmssNodes)
