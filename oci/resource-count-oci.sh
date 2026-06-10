@@ -25,10 +25,7 @@
 #
 # API/CLI used:
 #
-# - oci iam compartment list
-# - oci compute instance list
-##########################################################################################
-
+# - oci search resource structured-search
 ##########################################################################################
 ## Use of jq is required by this script.
 ##########################################################################################
@@ -39,106 +36,59 @@ if ! type "jq" > /dev/null; then
 fi
 
 ##########################################################################################
-## Utility functions.
+## Define resource types to count.
 ##########################################################################################
 
-oci_compartments_list() {
-  # shellcheck disable=SC2086
-  RESULT=$(oci iam compartment list --all --compartment-id-in-subtree true 2>/dev/null)
-  if [ $? -eq 0 ]; then
-    echo "${RESULT}"
-  fi
-}
-
-oci_compute_instances_list() {
-  # shellcheck disable=SC2086
-  RESULT=$(oci compute instance list --all --compartment-id "${1}" --lifecycle-state "RUNNING" 2>/dev/null)
-  if [ $? -eq 0 ]; then
-    echo "${RESULT}"
-  fi
-}
-
-oci_db_system_list(){
-  RESULT=$(oci db system list --all --compartment-id "${1}" --lifecycle-state "AVAILABLE" 2>/dev/null)
-  if [ $? -eq 0 ]; then
-    echo "${RESULT}"
-  fi
-}
-
-oci_load_balancer_list(){
-  RESULT=$(oci lb load-balancer list --all --compartment-id "${1}" --lifecycle-state "ACTIVE" 2>/dev/null)
-  if [ $? -eq 0 ]; then
-    echo "${RESULT}"
-  fi
-}
-
-####
-
-get_compartments() {
-  COMPARTMENTS=($(oci_compartments_list | jq -r '.data[]."id"' 2>/dev/null))
-  TOTAL_COMPARTMENTS=${#COMPARTMENTS[@]}
-}
+# Note: Resource type names can be found via `oci search resource-type list`
+#       or by inspecting the 'resource-type' field in the output of `oci search resource structured-search`.
+COMPUTE_INSTANCE_TYPE="Instance"
+DB_SYSTEM_TYPE="DbSystem"
+LOAD_BALANCER_TYPE="LoadBalancer"
+FUNCTION_TYPE="Function" # Added Function type
 
 ##########################################################################################
-## Set or reset counters.
-##########################################################################################
-
-reset_local_counters() {
-  COMPUTE_INSTANCES_COUNT=0
-  WORKLOAD_COUNT=0
-  BARE_METAL_VM_DB_COUNT=0
-  LOAD_BALANCER_COUNT=0
-}
-
-reset_global_counters() {
-  COMPUTE_INSTANCES_COUNT_GLOBAL=0
-  WORKLOAD_COUNT_GLOBAL=0
-  BARE_METAL_VM_DB_COUNT_GLOBAL=0
-  LOAD_BALANCER_COUNT_GLOBAL=0
-}
-
-##########################################################################################
-## Iterate through the billable resource types.
+## Count resources using OCI Search.
 ##########################################################################################
 
 count_resources() {
-  for ((COMPARTMENT_INDEX=0; COMPARTMENT_INDEX<=(TOTAL_COMPARTMENTS-1); COMPARTMENT_INDEX++))
-  do
-    COMPARTMENT="${COMPARTMENTS[$COMPARTMENT_INDEX]}"
+  echo "Querying OCI resources using the search service..."
 
-    echo "###################################################################################"
-    echo "Processing Compartment: ${COMPARTMENT}"
+  # Construct the query string
+  # We are looking for resources of specific types that are in an ACTIVE/RUNNING/AVAILABLE state.
+  # Adjust lifecycle states as needed based on OCI documentation for each resource type.
+  # Assuming 'ACTIVE' is the relevant state for Functions.
+  QUERY="query all resources where (resourceType = '${COMPUTE_INSTANCE_TYPE}' && lifecycleState = 'RUNNING') || (resourceType = '${DB_SYSTEM_TYPE}' && lifecycleState = 'AVAILABLE') || (resourceType = '${LOAD_BALANCER_TYPE}' && lifecycleState = 'ACTIVE') || (resourceType = '${FUNCTION_TYPE}' && lifecycleState = 'ACTIVE')"
 
-    RESOURCE_COUNT=$(oci_compute_instances_list "${COMPARTMENT}" | jq -r '.data[].id' 2>/dev/null | wc -l)
-    COMPUTE_INSTANCES_COUNT=$((COMPUTE_INSTANCES_COUNT + RESOURCE_COUNT))
-    echo "  Count of Compute Instances: ${COMPUTE_INSTANCES_COUNT}"
-    
-    RESOURCE_COUNT_VM=$(oci_db_system_list "${COMPARTMENT}" | jq -r '.data[].id' 2>/dev/null | wc -l)
-    BARE_METAL_VM_DB_COUNT=$((BARE_METAL_VM_DB_COUNT + RESOURCE_COUNT_VM))
-    echo " Count of Bare Metal VM Database Systems : ${BARE_METAL_VM_DB_COUNT}"
+  # Execute the search command
+  # We only need the count, jq can sum this up directly if we query just the resource type.
+  # Using --raw-output to get plain text count.
+  SEARCH_RESULTS=$(oci search resource structured-search --query-text "${QUERY}" --query "data.items[*].\"resource-type\"" --all 2>/dev/null)
 
-    RESOURCE_COUNT_LB=$(oci_load_balancer_list "${COMPARTMENT}" | jq -r '.data[].id' 2>/dev/null | wc -l)
-    LOAD_BALANCER_COUNT=$((LOAD_BALANCER_COUNT + RESOURCE_COUNT_LB))
-    echo " Count of Load Balancers : ${LOAD_BALANCER_COUNT}"
+  if [ $? -ne 0 ]; then
+    echo "Error executing OCI search command. Please check OCI CLI configuration and permissions."
+    exit 1
+  fi
 
+  # Count occurrences of each resource type using jq
+  COMPUTE_INSTANCES_COUNT_GLOBAL=$(echo "${SEARCH_RESULTS}" | jq -r --arg type "${COMPUTE_INSTANCE_TYPE}" 'map(select(. == $type)) | length')
+  BARE_METAL_VM_DB_COUNT_GLOBAL=$(echo "${SEARCH_RESULTS}" | jq -r --arg type "${DB_SYSTEM_TYPE}" 'map(select(. == $type)) | length')
+  LOAD_BALANCER_COUNT_GLOBAL=$(echo "${SEARCH_RESULTS}" | jq -r --arg type "${LOAD_BALANCER_TYPE}" 'map(select(. == $type)) | length')
+  FUNCTION_COUNT_GLOBAL=$(echo "${SEARCH_RESULTS}" | jq -r --arg type "${FUNCTION_TYPE}" 'map(select(. == $type)) | length') # Added Function count
 
-    WORKLOAD_COUNT=$((COMPUTE_INSTANCES_COUNT + LOAD_BALANCER_COUNT + BARE_METAL_VM_DB_COUNT))
-    echo "Total billable resources for Compartment: ${WORKLOAD_COUNT}"
-    echo "###################################################################################"
-    echo ""
-
-    COMPUTE_INSTANCES_COUNT_GLOBAL=$((COMPUTE_INSTANCES_COUNT_GLOBAL + COMPUTE_INSTANCES_COUNT))
-    BARE_METAL_VM_DB_COUNT_GLOBAL=$((BARE_METAL_VM_DB_COUNT_GLOBAL + BARE_METAL_VM_DB_COUNT))
-    LOAD_BALANCER_COUNT_GLOBAL=$((LOAD_BALANCER_COUNT_GLOBAL+LOAD_BALANCER_COUNT))
-    reset_local_counters
-  done
+  # Handle potential nulls from jq if no resources are found
+  COMPUTE_INSTANCES_COUNT_GLOBAL=${COMPUTE_INSTANCES_COUNT_GLOBAL:-0}
+  BARE_METAL_VM_DB_COUNT_GLOBAL=${BARE_METAL_VM_DB_COUNT_GLOBAL:-0}
+  LOAD_BALANCER_COUNT_GLOBAL=${LOAD_BALANCER_COUNT_GLOBAL:-0}
+  FUNCTION_COUNT_GLOBAL=${FUNCTION_COUNT_GLOBAL:-0} # Added Function count handling
 
   echo "###################################################################################"
-  echo "Totals"
-  echo "  Count of Compute Instances: ${COMPUTE_INSTANCES_COUNT_GLOBAL}"
-  echo "  Count of Bare Metal VM DB Systems: ${BARE_METAL_VM_DB_COUNT_GLOBAL}"
-  echo "  Count of Load Balancers: ${LOAD_BALANCER_COUNT_GLOBAL}"
-  WORKLOAD_COUNT_GLOBAL=$((COMPUTE_INSTANCES_COUNT_GLOBAL + BARE_METAL_VM_DB_COUNT_GLOBAL + LOAD_BALANCER_COUNT_GLOBAL))
+  echo "Totals (across all compartments)"
+  echo "  Count of Compute Instances (${COMPUTE_INSTANCE_TYPE}, RUNNING): ${COMPUTE_INSTANCES_COUNT_GLOBAL}"
+  echo "  Count of DB Systems (${DB_SYSTEM_TYPE}, AVAILABLE): ${BARE_METAL_VM_DB_COUNT_GLOBAL}"
+  echo "  Count of Load Balancers (${LOAD_BALANCER_TYPE}, ACTIVE): ${LOAD_BALANCER_COUNT_GLOBAL}"
+  echo "  Count of Functions (${FUNCTION_TYPE}, ACTIVE): ${FUNCTION_COUNT_GLOBAL}" # Added Function output
+  # Update total workload count
+  WORKLOAD_COUNT_GLOBAL=$((COMPUTE_INSTANCES_COUNT_GLOBAL + BARE_METAL_VM_DB_COUNT_GLOBAL + LOAD_BALANCER_COUNT_GLOBAL + FUNCTION_COUNT_GLOBAL))
   echo "Total billable resources: ${WORKLOAD_COUNT_GLOBAL}"
   echo "###################################################################################"
 }
@@ -153,6 +103,4 @@ ${__SOURCED__:+return}
 # Main.
 ##########################################################################################
 
-get_compartments
-reset_global_counters
 count_resources
