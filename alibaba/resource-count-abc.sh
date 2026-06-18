@@ -118,7 +118,7 @@ count_resources() {
     echo "###################################################################################"
     echo "Processing Region: ${REGION}"
 
-    RESOURCE_COUNT=$(get_instance_count "${REGION}")
+    RESOURCE_COUNT=$(get_instance_count_via_pagination "${REGION}") 
     COMPUTE_INSTANCES_COUNT=$((COMPUTE_INSTANCES_COUNT + RESOURCE_COUNT))
     echo "  Count of Compute Instances: ${COMPUTE_INSTANCES_COUNT}"
 
